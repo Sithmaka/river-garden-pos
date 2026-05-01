@@ -4,11 +4,11 @@ const path = require("path");
 const config = {
   // Development
   dev: {
-    appUrl: "https://codebell-pos-pwa.vercel.app/",
+    appUrl: "https://river-garden-pos.vercel.app/",
   },
   // Production - Load from Vercel
   production: {
-    appUrl: "https://codebell-pos-pwa.vercel.app/",
+    appUrl: "https://river-garden-pos.vercel.app/",
   },
 };
 
