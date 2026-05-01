@@ -37,4 +37,4 @@ linux:
   target:
     - AppImage
     - deb
-electronVersion: 41.3.0
+electronVersion: 41.4.0
