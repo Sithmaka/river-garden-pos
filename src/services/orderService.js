@@ -1,44 +1,5 @@
 /**
  * Order Service (Firebase Version)
- *
- * Uses Firestore collections:
- * - orders
- * - menu_items
- * - items
- * - stock_movements
- * - counters
- * - settings
- * - users
- *
- * Order structure:
- * orders/{orderId} {
- *   orderNumber,
- *   cashierId,
- *   customer_name,
- *   customer_phone,
- *   special_instructions,
- *   order_type,
- *   table_number,
- *   payment_method,
- *   status,
- *   subtotal,
- *   service_charge_percent,
- *   service_charge_amount,
- *   total,
- *   paid_at,
- *   items: [
- *     {
- *       id,
- *       name,
- *       price,
- *       quantity,
- *       line_total,
- *       ingredients: [...]
- *     }
- *   ],
- *   createdAt,
- *   updatedAt
- * }
  */
 
 import {
@@ -65,26 +26,20 @@ function round2(value) {
 }
 
 function normalizeOrderItem(item = {}) {
+  const price = Number(item.price ?? item.sellingPrice) || 0;
+  const quantity = Number(item.quantity) || 0;
+
   return {
     id: item.id || "",
     name: item.name || "",
-    price: Number(item.price) || 0,
-    quantity: Number(item.quantity) || 0,
-    line_total: round2(
-      (Number(item.price) || 0) * (Number(item.quantity) || 0)
-    ),
+    price,
+    quantity,
+    line_total: round2(price * quantity),
     ingredients: Array.isArray(item.ingredients) ? item.ingredients : [],
   };
 }
 
-/**
- * Service charge should apply ONLY for dine-in orders
- */
-function calculateTotals(
-  orderItems = [],
-  serviceChargePercent = 0,
-  orderType = "take-away"
-) {
+function calculateTotals(orderItems = [], serviceChargePercent = 0, orderType = "take-away") {
   const subtotal = round2(
     orderItems.reduce((sum, item) => sum + (Number(item.line_total) || 0), 0)
   );
@@ -135,9 +90,7 @@ function buildIngredientUsage(orderItems = []) {
         });
       }
 
-      usageMap.get(itemId).qty = round2(
-        usageMap.get(itemId).qty + totalRequired
-      );
+      usageMap.get(itemId).qty = round2(usageMap.get(itemId).qty + totalRequired);
     }
   }
 
@@ -147,7 +100,6 @@ function buildIngredientUsage(orderItems = []) {
 function diffIngredientUsage(oldUsage = [], newUsage = []) {
   const oldMap = new Map(oldUsage.map((u) => [u.itemId, u]));
   const newMap = new Map(newUsage.map((u) => [u.itemId, u]));
-
   const allIds = new Set([...oldMap.keys(), ...newMap.keys()]);
   const deltas = [];
 
@@ -164,7 +116,7 @@ function diffIngredientUsage(oldUsage = [], newUsage = []) {
         sku: base?.sku || "",
         unitId: base?.unitId || "",
         unitName: base?.unitName || "",
-        qtyChange: delta, // positive = deduct more, negative = restore stock
+        qtyChange: delta,
       });
     }
   }
@@ -188,15 +140,12 @@ async function getTableCount() {
   return Number(settings.table_count) || Number(settings.tableCount) || 0;
 }
 
-/**
- * Uses counters/orders document:
- * counters/orders { value: number }
- */
 async function generateOrderNumberTx(transaction) {
   const counterRef = doc(db, "counters", "orders");
   const counterSnap = await transaction.get(counterRef);
 
   let nextValue = 1;
+
   if (counterSnap.exists()) {
     const data = counterSnap.data();
     nextValue = (Number(data.value) || 0) + 1;
@@ -225,7 +174,7 @@ async function getMenuItemWithIngredients(menuItemId) {
   return {
     id: snap.id,
     name: data.name || "",
-    price: Number(data.price) || 0,
+    price: Number(data.price ?? data.sellingPrice) || 0,
     ingredients: Array.isArray(data.ingredients) ? data.ingredients : [],
     isAvailable: data.isAvailable ?? data.is_available ?? true,
   };
@@ -241,8 +190,7 @@ async function enrichOrderItems(orderItems = []) {
       normalizeOrderItem({
         id: menuItem.id,
         name: item.name || menuItem.name,
-        price:
-          item.price !== undefined ? Number(item.price) : Number(menuItem.price),
+        price: item.price !== undefined ? Number(item.price) : Number(menuItem.price),
         quantity: Number(item.quantity) || 0,
         ingredients: menuItem.ingredients,
       })
@@ -252,10 +200,19 @@ async function enrichOrderItems(orderItems = []) {
   return enriched;
 }
 
-async function applyInventoryDeltaTx(transaction, deltas, meta = {}) {
-  const movementWrites = [];
+/**
+ * IMPORTANT:
+ * This function reads ALL inventory docs first,
+ * then performs ALL writes.
+ * This avoids Firestore transaction error:
+ * "all reads must be executed before all writes"
+ */
+async function applyInventoryDeltaTx(transaction, deltas = [], meta = {}) {
+  const validDeltas = deltas.filter((d) => d.itemId && Number(d.qtyChange) !== 0);
+  const inventorySnaps = new Map();
 
-  for (const delta of deltas) {
+  // ✅ READ PHASE ONLY
+  for (const delta of validDeltas) {
     const inventoryRef = doc(db, "items", delta.itemId);
     const inventorySnap = await transaction.get(inventoryRef);
 
@@ -263,7 +220,18 @@ async function applyInventoryDeltaTx(transaction, deltas, meta = {}) {
       throw new Error(`Inventory item not found: ${delta.itemId}`);
     }
 
-    const inventoryData = inventorySnap.data();
+    inventorySnaps.set(delta.itemId, {
+      ref: inventoryRef,
+      snap: inventorySnap,
+    });
+  }
+
+  const movementWrites = [];
+
+  // ✅ WRITE PHASE ONLY
+  for (const delta of validDeltas) {
+    const entry = inventorySnaps.get(delta.itemId);
+    const inventoryData = entry.snap.data() || {};
     const currentStock = Number(inventoryData.currentStock) || 0;
 
     let nextStock = currentStock;
@@ -271,27 +239,26 @@ async function applyInventoryDeltaTx(transaction, deltas, meta = {}) {
     if (delta.qtyChange > 0) {
       if (currentStock < delta.qtyChange) {
         throw new Error(
-          `Insufficient stock for ${delta.name || delta.itemId}. Required ${
+          `Insufficient stock for ${delta.name || inventoryData.name || delta.itemId}. Required ${
             delta.qtyChange
           }, available ${currentStock}.`
         );
       }
+
       nextStock = round2(currentStock - delta.qtyChange);
     } else if (delta.qtyChange < 0) {
       nextStock = round2(currentStock + Math.abs(delta.qtyChange));
     }
 
-    transaction.update(inventoryRef, {
+    transaction.update(entry.ref, {
       currentStock: nextStock,
       updatedAt: serverTimestamp(),
-      lastSoldAt:
-        delta.qtyChange > 0
-          ? serverTimestamp()
-          : inventoryData.lastSoldAt || null,
+      lastSoldAt: delta.qtyChange > 0 ? serverTimestamp() : inventoryData.lastSoldAt || null,
     });
 
     movementWrites.push({
       inventoryItemId: delta.itemId,
+      itemId: delta.itemId,
       itemName: delta.name || inventoryData.name || "",
       sku: delta.sku || inventoryData.sku || "",
       unitId: delta.unitId || inventoryData.unitId || "",
@@ -315,12 +282,6 @@ async function applyInventoryDeltaTx(transaction, deltas, meta = {}) {
    CORE ORDER ACTIONS
 ========================================================= */
 
-/**
- * Submit a complete order
- * @param {Object} orderData
- * @param {Array} orderItems
- * @param {number} serviceChargePercent
- */
 export async function submitOrder(orderData, orderItems, serviceChargePercent) {
   try {
     const cashierId = await getCurrentUserId();
@@ -333,13 +294,16 @@ export async function submitOrder(orderData, orderItems, serviceChargePercent) {
     }
 
     let tableNumber = null;
+
     if (orderType === "dine-in") {
       tableNumber = Number(orderData.table_number);
+
       if (!tableNumber) {
         throw new Error("Table number is required for dine-in orders");
       }
 
       const tableCount = await getTableCount();
+
       if (tableCount > 0 && (tableNumber < 1 || tableNumber > tableCount)) {
         throw new Error(`Table number must be between 1 and ${tableCount}`);
       }
@@ -350,11 +314,13 @@ export async function submitOrder(orderData, orderItems, serviceChargePercent) {
     const ingredientUsage = buildIngredientUsage(enrichedItems);
 
     const result = await runTransaction(db, async (transaction) => {
+      // ✅ READ counter first
       const { counterRef, nextValue, orderNumber } =
         await generateOrderNumberTx(transaction);
 
       const orderRef = doc(collection(db, "orders"));
 
+      // ✅ READ inventory inside applyInventoryDeltaTx before any writes
       const movementWrites = await applyInventoryDeltaTx(
         transaction,
         ingredientUsage.map((u) => ({ ...u, qtyChange: u.qty })),
@@ -370,6 +336,7 @@ export async function submitOrder(orderData, orderItems, serviceChargePercent) {
         orderType === "dine-in" &&
         (!orderData.payment_method || orderData.payment_method === "pending");
 
+      // ✅ WRITES start here
       transaction.set(
         counterRef,
         {
@@ -382,19 +349,26 @@ export async function submitOrder(orderData, orderItems, serviceChargePercent) {
       transaction.set(orderRef, {
         orderNumber,
         cashierId,
+
         customer_name: orderData.customer_name || null,
         customer_phone: orderData.customer_phone || null,
         special_instructions: orderData.special_instructions || null,
+
         order_type: orderType,
         table_number: tableNumber,
+
         payment_method: isDineInDeferred
           ? "pending"
           : orderData.payment_method || "cash",
+
         status: isDineInDeferred ? "pending" : "paid",
         paid_at: isDineInDeferred ? null : new Date(),
+
         ...totals,
+
         items: enrichedItems,
         ingredientUsage,
+
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -428,17 +402,14 @@ export async function submitOrder(orderData, orderItems, serviceChargePercent) {
   }
 }
 
-/**
- * Add new items to an existing order
- */
 export async function addItemsToOrder(orderId, newItems, serviceChargePercent) {
   try {
     const cashierId = await getCurrentUserId();
     const orderRef = doc(db, "orders", orderId);
-
     const preparedItems = await enrichOrderItems(newItems);
 
     const result = await runTransaction(db, async (transaction) => {
+      // ✅ READ order first
       const orderSnap = await transaction.get(orderRef);
 
       if (!orderSnap.exists()) {
@@ -449,9 +420,7 @@ export async function addItemsToOrder(orderId, newItems, serviceChargePercent) {
       const existingItems = Array.isArray(order.items) ? [...order.items] : [];
 
       for (const newItem of preparedItems) {
-        const existingIndex = existingItems.findIndex(
-          (item) => item.id === newItem.id
-        );
+        const existingIndex = existingItems.findIndex((item) => item.id === newItem.id);
 
         if (existingIndex >= 0) {
           const mergedQty =
@@ -475,12 +444,14 @@ export async function addItemsToOrder(orderId, newItems, serviceChargePercent) {
 
       const newUsage = buildIngredientUsage(existingItems);
       const deltas = diffIngredientUsage(oldUsage, newUsage);
+
       const totals = calculateTotals(
         existingItems,
         serviceChargePercent,
         order.order_type || "take-away"
       );
 
+      // ✅ READ inventory before writes
       const movementWrites = await applyInventoryDeltaTx(transaction, deltas, {
         orderId,
         orderNumber: order.orderNumber || null,
@@ -488,6 +459,7 @@ export async function addItemsToOrder(orderId, newItems, serviceChargePercent) {
         reason: "order_add_items",
       });
 
+      // ✅ WRITE order after all reads
       transaction.update(orderRef, {
         items: existingItems,
         ingredientUsage: newUsage,
@@ -520,17 +492,7 @@ export async function addItemsToOrder(orderId, newItems, serviceChargePercent) {
   }
 }
 
-/**
- * Remove an item from an existing order
- * @param {string} orderId
- * @param {string} menuItemId
- * @param {number} serviceChargePercent
- */
-export async function removeItemFromOrder(
-  orderId,
-  menuItemId,
-  serviceChargePercent
-) {
+export async function removeItemFromOrder(orderId, menuItemId, serviceChargePercent) {
   try {
     const cashierId = await getCurrentUserId();
     const orderRef = doc(db, "orders", orderId);
@@ -556,6 +518,7 @@ export async function removeItemFromOrder(
 
       const newUsage = buildIngredientUsage(updatedItems);
       const deltas = diffIngredientUsage(oldUsage, newUsage);
+
       const totals = calculateTotals(
         updatedItems,
         serviceChargePercent,
@@ -601,9 +564,6 @@ export async function removeItemFromOrder(
   }
 }
 
-/**
- * Update item quantity in an existing order
- */
 export async function updateItemQuantityInOrder(
   orderId,
   menuItemId,
@@ -626,6 +586,7 @@ export async function updateItemQuantityInOrder(
       const currentItems = Array.isArray(order.items) ? [...order.items] : [];
 
       const itemIndex = currentItems.findIndex((item) => item.id === menuItemId);
+
       if (itemIndex < 0) {
         throw new Error("Item not found");
       }
@@ -645,6 +606,7 @@ export async function updateItemQuantityInOrder(
 
       const newUsage = buildIngredientUsage(currentItems);
       const deltas = diffIngredientUsage(oldUsage, newUsage);
+
       const totals = calculateTotals(
         currentItems,
         serviceChargePercent,
@@ -690,9 +652,6 @@ export async function updateItemQuantityInOrder(
   }
 }
 
-/**
- * Mark order as paid
- */
 export async function closeOrderAsPaid(orderId, paymentMethod) {
   try {
     const orderRef = doc(db, "orders", orderId);
@@ -718,28 +677,17 @@ export async function closeOrderAsPaid(orderId, paymentMethod) {
   }
 }
 
-/**
- * Delete one item from order by item id
- * Same behavior as removeItemFromOrder
- */
-export async function deleteOrderItem(
-  orderId,
-  orderItemId,
-  serviceChargePercent
-) {
+export async function deleteOrderItem(orderId, orderItemId, serviceChargePercent) {
   return removeItemFromOrder(orderId, orderItemId, serviceChargePercent);
 }
 
-/**
- * Delete entire order
- * Restores deducted inventory if order existed
- */
 export async function deleteOrder(orderId) {
   try {
     const cashierId = await getCurrentUserId();
     const orderRef = doc(db, "orders", orderId);
 
     const orderSnap = await getDoc(orderRef);
+
     if (!orderSnap.exists()) {
       throw new Error("Order not found");
     }
@@ -793,7 +741,7 @@ export async function deleteOrder(orderId) {
 }
 
 /* =========================================================
-   OPTIONAL READ HELPERS
+   READ HELPERS
 ========================================================= */
 
 export async function getOrderById(orderId) {

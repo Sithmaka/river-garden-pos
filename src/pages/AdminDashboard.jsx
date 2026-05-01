@@ -135,6 +135,25 @@ export default function AdminDashboard() {
             </div>
           </Link>
 
+          <Link to="/admin/orders-analysis" className="block h-full">
+            <div className="bg-white border-2 border-gray-200 rounded-lg shadow-sm p-6 hover:shadow-lg hover:border-teal-500 transition-all h-full flex flex-col">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-700">
+                  Orders Analysis
+                </h2>
+                <div className="w-12 h-12 bg-teal-50 rounded-lg flex items-center justify-center">
+                  <span className="text-2xl">📊</span>
+                </div>
+              </div>
+
+              <p className="text-gray-600 mb-4 flex-grow">
+                Analyze sales, orders, service charges, and menu item performance
+              </p>
+
+              <Button variant="primary">View Analysis</Button>
+            </div>
+          </Link>
+
           <Link to="/admin/orders" className="block h-full">
             <div className="bg-white border-2 border-gray-200 rounded-lg shadow-sm p-6 hover:shadow-lg hover:border-teal-500 transition-all h-full flex flex-col">
               <div className="flex items-center justify-between mb-4">

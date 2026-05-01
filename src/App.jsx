@@ -36,6 +36,7 @@ import PrinterDiagnostics from './pages/PrinterDiagnostics';
 import SplashScreen from './components/ui/SplashScreen';
 import ResetPassword from './pages/ResetPassword';
 import './App.css';
+import OrdersAnalysis from "./pages/OrdersAnalysis";
 
 /**
  * RoleBasedRedirect Component
@@ -202,6 +203,7 @@ function App() {
             </RoleRoute>
           }
         />
+        <Route path="/admin/orders-analysis" element={<OrdersAnalysis />} />
 
         {/* Cashier Routes */}
         <Route
