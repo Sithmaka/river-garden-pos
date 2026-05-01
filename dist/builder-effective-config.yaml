@@ -1,0 +1,40 @@
+directories:
+  output: dist
+  buildResources: assets
+appId: com.codebell.pos
+productName: CodeBell POS
+files:
+  - filter:
+      - dist/**/*
+      - electron/**/*
+      - package.json
+publish: null
+win:
+  target:
+    - nsis
+    - portable
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: CodeBell POS
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.business
+dmg:
+  contents:
+    - x: 110
+      'y': 150
+      type: file
+    - x: 240
+      'y': 150
+      type: link
+      path: /Applications
+linux:
+  target:
+    - AppImage
+    - deb
+electronVersion: 41.3.0

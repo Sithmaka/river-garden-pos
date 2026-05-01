@@ -1,0 +1,400 @@
+/* ============================================================= */
+/* PRINT.CSS – THERMAL 72mm RECEIPT WITH LOGO WATERMARK */
+/* Codebell POS System – Professional, Clean, Thermal-Ready     */
+/* Optimized for 72mm width thermal printers                    */
+/* ============================================================= */
+
+/* -------------------------- PRINT ONLY ------------------------- */
+@media print {
+  /* 1. Page setup – 72mm thermal */
+  @page {
+    size: 72mm auto;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Remove all body/html margins and padding */
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 72mm !important;
+  }
+
+  /* 2. Hide everything except receipt */
+  body * {
+    visibility: hidden !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .receipt-container,
+  .receipt-container * {
+    visibility: visible !important;
+  }
+
+  /* 3. Receipt container – 72mm */
+  .receipt-container {
+    position: static !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 72mm !important;
+    max-width: 72mm !important;
+    margin: 0 !important;
+    padding: 1mm 1.5mm !important;
+    background: white !important;
+    font-family: 'Courier New', Courier, monospace !important;
+    font-size: 8pt !important;
+    line-height: 1.3 !important;
+    color: #000 !important;
+    box-sizing: border-box !important;    transform: scale(0.96) !important;
+    transform-origin: top left !important;
+    width: calc(72mm / 0.96) !important;  }
+
+  /* 4. Remove all forced page breaks */
+  .customer-receipt,
+  .kitchen-slip,
+  .section-divider {
+    page-break-inside: avoid !important;
+    page-break-before: avoid !important;
+    page-break-after: avoid !important;
+    break-inside: avoid !important;
+    break-before: avoid !important;
+    break-after: avoid !important;
+    display: block !important;
+  }
+
+  .section-divider {
+    display: none !important;
+  }
+
+  /* 5. Hide UI elements */
+  button,
+  nav,
+  .no-print,
+  .modal-overlay,
+  header,
+  footer {
+    display: none !important;
+  }
+
+  /* 6. Logo – Force correct printing with larger size */
+  .receipt-container img {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    image-rendering: -webkit-optimize-contrast !important;
+    max-width: 25mm !important;
+    height: auto !important;
+    opacity: 0.85 !important;
+    display: block !important;
+    margin: 0 auto 6px auto !important;
+  }
+
+  /* ------------------- COMMON STYLES ------------------- */
+  .receipt-header,
+  .kitchen-header {
+    text-align: center;
+    margin-bottom: 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px dashed #000;
+  }
+
+  .receipt-header h1,
+  .kitchen-header h2 {
+    font-size: 12pt;
+    font-weight: bold;
+    margin: 0 0 2px 0;
+  }
+
+  .receipt-header p,
+  .kitchen-header p {
+    font-size: 8.5pt;
+    margin: 0 0;
+  }
+
+  /* ------------------- CUSTOMER RECEIPT ------------------- */
+  /* ------------------- CUSTOMER RECEIPT ------------------- */
+  .customer-info p {
+    font-size: 8.5pt;
+    margin: 1px 0;
+  }
+
+  .items-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 3px 0;
+    font-size: 8.5pt;
+    table-layout: fixed;
+    font-weight: bold;
+  }
+
+  .items-table th {
+    text-align: left;
+    border-bottom: 1px solid #000;
+    padding: 1px 0.5px;
+    font-weight: bold;
+    overflow: visible;
+    word-break: break-word;
+    font-size: 8.5pt;
+  }
+
+  .items-table td {
+    padding: 1px 0.5px;
+    border-bottom: 1px dotted #ccc;
+    word-break: break-word;
+    overflow: visible;
+    white-space: normal;
+    font-size: 8.5pt;
+  }
+
+  .items-table td:nth-child(2),
+  .items-table td:nth-child(3),
+  .items-table td:nth-child(4),
+  .items-table th:nth-child(2),
+  .items-table th:nth-child(3),
+  .items-table th:nth-child(4) {
+    text-align: right;
+    font-size: 7pt;
+    white-space: normal;
+    overflow: visible;
+  }
+
+  /* Prevent column 1 (Item name) from being too wide */
+  .items-table td:nth-child(1),
+  .items-table th:nth-child(1) {
+    width: 48%;
+    word-break: break-word;
+  }
+
+  /* Fixed column widths for quantity, price, total */
+  .items-table td:nth-child(2),
+  .items-table th:nth-child(2) {
+    width: 14%;
+  }
+
+  .items-table td:nth-child(3),
+  .items-table th:nth-child(3) {
+    width: 19%;
+  }
+
+  .items-table td:nth-child(4),
+  .items-table th:nth-child(4) {
+    width: 19%;
+  }
+
+  .totals {
+    margin: 6px 0;
+    padding-top: 4px;
+    border-top: 1px solid #000;
+  }
+
+  .total-line {
+    display: flex;
+    justify-content: space-between;
+    font-size: 8.5pt;
+    margin: 1px 0;
+    font-weight: bold;
+  }
+
+  .grand-total {
+    font-size: 9.5pt;
+    font-weight: bold;
+    margin-top: 3px;
+    border-top: 1px solid #000;
+    padding-top: 3px;
+  }
+
+  .payment-info,
+  .footer {
+    text-align: center;
+    margin: 6px 0 0;
+    font-size: 8.5pt;
+  }
+
+  .footer {
+    border-top: 1px dashed #000;
+    padding-top: 4px;
+  }
+
+  /* Watermark text - Larger and more visible */
+  .receipt-container > div > div:last-child > div {
+    font-size: 10pt !important;
+    color: #000 !important;
+    text-align: center !important;
+    font-weight: bold !important;
+    margin-top: 4px !important;
+    line-height: 1.4;
+  }
+
+  /* ------------------- KITCHEN SLIP ------------------- */
+  .kitchen-items-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 3px 0;
+    font-size: 10pt;
+    table-layout: fixed;
+  }
+
+  .kitchen-items-table th {
+    text-align: left;
+    border-bottom: 1px solid #000;
+    padding: 1px 0.5px;
+    font-weight: bold;
+    font-size: 11pt;
+    overflow: hidden;
+    word-break: break-word;
+  }
+
+  .kitchen-items-table td {
+    padding: 1px 0.5px;
+    border-bottom: 1px dotted #ccc;
+    word-break: break-word;
+    font-size: 11pt;
+    font-weight: bold;
+    overflow: hidden;
+  }
+
+  .kitchen-items-table th:nth-child(1),
+  .kitchen-items-table td:nth-child(1) {
+    width: 68%;
+    word-wrap: break-word;
+  }
+
+  .kitchen-items-table th:nth-child(2),
+  .kitchen-items-table td:nth-child(2) {
+    text-align: right;
+    width: 32%;
+    white-space: normal;
+    overflow: visible;
+  }
+  }
+
+  .special-instructions {
+    margin-top: 8px;
+    padding-top: 4px;
+    border-top: 1px dashed #000;
+    font-size: 11pt;
+  }
+
+  .kitchen-header h2 {
+    font-size: 16pt !important;
+  }
+
+  .kitchen-header p {
+    font-size: 11pt !important;
+  }
+}
+
+/* -------------------------- SCREEN PREVIEW -------------------------- */
+@media screen {
+  .receipt-container {
+    max-width: 400px;
+    margin: 20px auto;
+    padding: 20px;
+    background: #fff;
+    border: 1px solid #ddd;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11pt;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  }
+
+  .customer-receipt,
+  .kitchen-slip {
+    background: #fff;
+    padding: 15px;
+    margin-bottom: 20px;
+    border: 1px dashed #ccc;
+  }
+
+  .section-divider {
+    height: 2px;
+    background: #000;
+    margin: 30px 0;
+  }
+
+  .receipt-header,
+  .kitchen-header {
+    text-align: center;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px dashed #333;
+  }
+
+  .items-table,
+  .kitchen-items-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 15px 0;
+    font-size: 15pt;
+    font-weight: bold;
+  }
+
+  .kitchen-items-table {
+    font-size: 16pt;
+  }
+
+  .items-table th,
+  .kitchen-items-table th {
+    border-bottom: 2px solid #333;
+    padding: 8px 4px;
+    font-size: 15pt;
+  }
+
+  .kitchen-items-table th {
+    font-size: 16pt;
+  }
+
+  .items-table td,
+  .kitchen-items-table td {
+    padding: 6px 4px;
+    border-bottom: 1px dotted #ccc;
+    font-size: 15pt;
+  }
+
+  .kitchen-items-table td {
+    font-size: 16pt;
+    font-weight: bold;
+  }
+
+  .special-instructions {
+    font-size: 13pt;
+  }
+
+  .kitchen-header h2 {
+    font-size: 24pt !important;
+  }
+
+  .kitchen-header p {
+    font-size: 14pt !important;
+  }
+
+  .totals {
+    margin-top: 15px;
+    padding-top: 10px;
+    border-top: 2px solid #333;
+  }
+
+  .grand-total {
+    font-weight: bold;
+    font-size: 1.2em;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 2px solid #333;
+  }
+
+  .footer {
+    text-align: center;
+    margin-top: 15px;
+    padding-top: 10px;
+    border-top: 2px dashed #333;
+  }
+
+  /* Logo in screen preview */
+  .receipt-container img {
+    max-width: 25mm;
+    height: auto;
+    display: block;
+    margin: 0 auto 4px auto;
+    opacity: 0.8;
+  }
+}

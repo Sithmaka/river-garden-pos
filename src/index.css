@@ -1,0 +1,131 @@
+/* BiteSync POS - Tailwind CSS */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom Utilities */
+@layer base {
+  /* Reset body styles for Tailwind */
+  body {
+    @apply m-0 font-sans text-base text-gray-900 bg-gray-50;
+  }
+  
+  /* Import Inter font */
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  
+  /* Optimize font rendering */
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer components {
+  /* Touch-friendly tap targets */
+  .touch-target {
+    @apply min-h-touch min-w-touch;
+  }
+  
+  .touch-target-sm {
+    @apply min-h-touch-sm min-w-touch-sm;
+  }
+  
+  .touch-target-lg {
+    @apply min-h-touch-lg min-w-touch-lg;
+  }
+  
+  /* Card variations */
+  .card {
+    @apply bg-white rounded-card shadow-card border border-gray-200;
+  }
+  
+  .card-hover {
+    @apply transition-shadow hover:shadow-card-hover;
+  }
+  
+  /* Focus styles for accessibility */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2;
+  }
+  
+  /* Button reset for custom buttons */
+  .btn-reset {
+    @apply border-none bg-transparent p-0 m-0 cursor-pointer;
+  }
+  
+  /* Scrollable containers */
+  .scroll-shadow {
+    background: 
+      linear-gradient(white 30%, rgba(255,255,255,0)),
+      linear-gradient(rgba(255,255,255,0), white 70%) 0 100%,
+      radial-gradient(farthest-side at 50% 0, rgba(0,0,0,.2), rgba(0,0,0,0)),
+      radial-gradient(farthest-side at 50% 100%, rgba(0,0,0,.2), rgba(0,0,0,0)) 0 100%;
+    background-repeat: no-repeat;
+    background-size: 100% 40px, 100% 40px, 100% 14px, 100% 14px;
+    background-attachment: local, local, scroll, scroll;
+  }
+}
+
+@layer utilities {
+  /* Animation utilities */
+  .animate-slide-in {
+    animation: slideIn 0.3s ease-out;
+  }
+  
+  .animate-fade-in {
+    animation: fadeIn 0.2s ease-in;
+  }
+  
+  .animate-bounce-subtle {
+    animation: bounceSubtle 0.5s ease-in-out;
+  }
+  
+  /* Custom keyframes */
+  @keyframes slideIn {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+  
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  
+  @keyframes bounceSubtle {
+    0%, 100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-5px);
+    }
+  }
+  
+  /* Print styles */
+  @media print {
+    .no-print {
+      display: none !important;
+    }
+    
+    .print-full-width {
+      width: 100% !important;
+      max-width: none !important;
+    }
+  }
+  
+  /* Touch device optimizations */
+  @media (hover: none) and (pointer: coarse) {
+    .hover-only {
+      display: none;
+    }
+  }
+}
