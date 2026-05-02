@@ -14,6 +14,7 @@ import {
 import Button from "../components/ui/Button";
 import { getPaidOrdersForAnalysis } from "../services/orderAnalysisService";
 import { formatCurrency } from "../utils/formatting";
+import { useNavigate } from "react-router-dom";
 
 function toInputDate(date) {
   return date.toISOString().slice(0, 10);
@@ -56,6 +57,8 @@ function getItemTotal(item) {
 }
 
 export default function OrdersAnalysis() {
+  const navigate = useNavigate();
+
   const today = new Date();
 
   const [fromDate, setFromDate] = useState(toInputDate(new Date(today.getFullYear(), 0, 1)));
@@ -229,22 +232,29 @@ export default function OrdersAnalysis() {
         <div className="bg-white rounded-2xl shadow p-6">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
-              <h1 className="text-3xl font-bold text-slate-900">Orders Analysis</h1>
-              <p className="text-slate-500 mt-2 max-w-4xl">
+                <Button
+                onClick={() => navigate("/admin/dashboard")}
+                className="mb-4 bg-slate-700 hover:bg-slate-800 text-white px-5 py-2"
+                >
+                ← Go Back
+                </Button>
+
+                <h1 className="text-3xl font-bold text-slate-900">Orders Analysis</h1>
+                <p className="text-slate-500 mt-2 max-w-4xl">
                 Analyze order history by month with total sales, total orders, and service charge.
                 Use the calendar range filter to focus on any period. This page uses{" "}
                 <b>paid_at</b> as the transaction date, <b>total</b> as total sales, and{" "}
                 <b>service_charge_amount</b> as service charge.
-              </p>
+                </p>
             </div>
 
             <Button
-              onClick={loadAnalysis}
-              className="bg-teal-600 hover:bg-teal-700 text-white px-5 py-2"
+                onClick={loadAnalysis}
+                className="bg-teal-600 hover:bg-teal-700 text-white px-5 py-2"
             >
-              Refresh
+                Refresh
             </Button>
-          </div>
+            </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6">
             <div>

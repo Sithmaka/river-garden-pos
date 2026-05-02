@@ -1,5 +1,5 @@
 /**
- * Order Service (Firebase Version)
+ * Order Service - Firebase + Offline POS Ready
  */
 
 import {
@@ -17,12 +17,40 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "./firebase";
 
+const OFFLINE_ORDERS_KEY = "codebell_offline_orders";
+
 /* =========================================================
-   HELPERS
+   BASIC HELPERS
 ========================================================= */
 
 function round2(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function isOnline() {
+  return typeof navigator !== "undefined" ? navigator.onLine : true;
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function createOfflineId() {
+  return `offline_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createOfflineOrderNumber() {
+  const today = new Date();
+  const dateStr = today.toISOString().slice(0, 10).replace(/-/g, "");
+
+  const offlineOrders = getOfflineOrders();
+  const todayOrders = offlineOrders.filter((order) =>
+    String(order.orderNumber || "").startsWith(`ORD-${dateStr}-`)
+  );
+
+  const sequence = String(todayOrders.length + 1).padStart(4, "0");
+
+  return `ORD-${dateStr}-${sequence}`;
 }
 
 function normalizeOrderItem(item = {}) {
@@ -45,19 +73,20 @@ function calculateTotals(orderItems = [], serviceChargePercent = 0, orderType = 
   );
 
   const shouldApplyServiceCharge = orderType === "dine-in";
-  const normalizedPercent = shouldApplyServiceCharge
+
+  const service_charge_percent = shouldApplyServiceCharge
     ? Number(serviceChargePercent) || 0
     : 0;
 
   const service_charge_amount = shouldApplyServiceCharge
-    ? round2(subtotal * (normalizedPercent / 100))
+    ? round2(subtotal * (service_charge_percent / 100))
     : 0;
 
   const total = round2(subtotal + service_charge_amount);
 
   return {
     subtotal,
-    service_charge_percent: normalizedPercent,
+    service_charge_percent,
     service_charge_amount,
     total,
   };
@@ -110,6 +139,7 @@ function diffIngredientUsage(oldUsage = [], newUsage = []) {
 
     if (delta !== 0) {
       const base = newMap.get(itemId) || oldMap.get(itemId);
+
       deltas.push({
         itemId,
         name: base?.name || "",
@@ -129,6 +159,51 @@ async function getCurrentUserId() {
   if (!user) throw new Error("User not authenticated");
   return user.uid;
 }
+
+/* =========================================================
+   OFFLINE STORAGE HELPERS
+========================================================= */
+
+export function getOfflineOrders() {
+  try {
+    const raw = localStorage.getItem(OFFLINE_ORDERS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveOfflineOrders(orders = []) {
+  localStorage.setItem(OFFLINE_ORDERS_KEY, JSON.stringify(orders));
+}
+
+function addOfflineOrder(order) {
+  const existing = getOfflineOrders();
+  saveOfflineOrders([order, ...existing]);
+}
+
+function removeOfflineOrder(localId) {
+  const existing = getOfflineOrders();
+  saveOfflineOrders(existing.filter((order) => order.localId !== localId));
+}
+
+function updateOfflineOrder(localId, patch = {}) {
+  const existing = getOfflineOrders();
+  saveOfflineOrders(
+    existing.map((order) =>
+      order.localId === localId ? { ...order, ...patch } : order
+    )
+  );
+}
+
+export function getPendingOfflineOrderCount() {
+  return getOfflineOrders().filter((o) => o.syncStatus !== "synced").length;
+}
+
+/* =========================================================
+   FIRESTORE HELPERS
+========================================================= */
 
 async function getSettingsDoc() {
   const snap = await getDoc(doc(db, "settings", "global"));
@@ -184,34 +259,33 @@ async function enrichOrderItems(orderItems = []) {
   const enriched = [];
 
   for (const item of orderItems) {
-    const menuItem = await getMenuItemWithIngredients(item.id);
+    try {
+      const menuItem = await getMenuItemWithIngredients(item.id);
 
-    enriched.push(
-      normalizeOrderItem({
-        id: menuItem.id,
-        name: item.name || menuItem.name,
-        price: item.price !== undefined ? Number(item.price) : Number(menuItem.price),
-        quantity: Number(item.quantity) || 0,
-        ingredients: menuItem.ingredients,
-      })
-    );
+      enriched.push(
+        normalizeOrderItem({
+          id: menuItem.id,
+          name: item.name || menuItem.name,
+          price:
+            item.price !== undefined
+              ? Number(item.price)
+              : Number(menuItem.price),
+          quantity: Number(item.quantity) || 0,
+          ingredients: menuItem.ingredients,
+        })
+      );
+    } catch {
+      enriched.push(normalizeOrderItem(item));
+    }
   }
 
   return enriched;
 }
 
-/**
- * IMPORTANT:
- * This function reads ALL inventory docs first,
- * then performs ALL writes.
- * This avoids Firestore transaction error:
- * "all reads must be executed before all writes"
- */
 async function applyInventoryDeltaTx(transaction, deltas = [], meta = {}) {
   const validDeltas = deltas.filter((d) => d.itemId && Number(d.qtyChange) !== 0);
   const inventorySnaps = new Map();
 
-  // ✅ READ PHASE ONLY
   for (const delta of validDeltas) {
     const inventoryRef = doc(db, "items", delta.itemId);
     const inventorySnap = await transaction.get(inventoryRef);
@@ -228,7 +302,6 @@ async function applyInventoryDeltaTx(transaction, deltas = [], meta = {}) {
 
   const movementWrites = [];
 
-  // ✅ WRITE PHASE ONLY
   for (const delta of validDeltas) {
     const entry = inventorySnaps.get(delta.itemId);
     const inventoryData = entry.snap.data() || {};
@@ -239,9 +312,9 @@ async function applyInventoryDeltaTx(transaction, deltas = [], meta = {}) {
     if (delta.qtyChange > 0) {
       if (currentStock < delta.qtyChange) {
         throw new Error(
-          `Insufficient stock for ${delta.name || inventoryData.name || delta.itemId}. Required ${
-            delta.qtyChange
-          }, available ${currentStock}.`
+          `Insufficient stock for ${
+            delta.name || inventoryData.name || delta.itemId
+          }. Required ${delta.qtyChange}, available ${currentStock}.`
         );
       }
 
@@ -253,7 +326,10 @@ async function applyInventoryDeltaTx(transaction, deltas = [], meta = {}) {
     transaction.update(entry.ref, {
       currentStock: nextStock,
       updatedAt: serverTimestamp(),
-      lastSoldAt: delta.qtyChange > 0 ? serverTimestamp() : inventoryData.lastSoldAt || null,
+      lastSoldAt:
+        delta.qtyChange > 0
+          ? serverTimestamp()
+          : inventoryData.lastSoldAt || null,
     });
 
     movementWrites.push({
@@ -279,148 +355,329 @@ async function applyInventoryDeltaTx(transaction, deltas = [], meta = {}) {
 }
 
 /* =========================================================
-   CORE ORDER ACTIONS
+   OFFLINE ORDER CREATE
+========================================================= */
+
+async function createOfflineOrder(orderData, orderItems, serviceChargePercent) {
+  const cashierId = auth.currentUser?.uid || "offline-user";
+  const orderType = orderData.order_type || "take-away";
+
+  const allowedOrderTypes = ["dine-in", "take-away", "delivery"];
+
+  if (!allowedOrderTypes.includes(orderType)) {
+    throw new Error("Invalid order type");
+  }
+
+  if (orderType === "dine-in" && !Number(orderData.table_number)) {
+    throw new Error("Table number is required for dine-in orders");
+  }
+
+  const localId = createOfflineId();
+  const orderNumber = createOfflineOrderNumber();
+
+  const enrichedItems = orderItems.map(normalizeOrderItem);
+  const totals = calculateTotals(enrichedItems, serviceChargePercent, orderType);
+  const ingredientUsage = buildIngredientUsage(enrichedItems);
+
+  const isDineInDeferred =
+    orderType === "dine-in" &&
+    (!orderData.payment_method || orderData.payment_method === "pending");
+
+  const offlineOrder = {
+    id: localId,
+    localId,
+    isOffline: true,
+    syncStatus: "pending",
+
+    orderNumber,
+    offlineOrderNumber: orderNumber,
+    firebaseOrderId: null,
+
+    cashierId,
+
+    customer_name: orderData.customer_name || null,
+    customer_phone: orderData.customer_phone || null,
+    special_instructions: orderData.special_instructions || null,
+
+    order_type: orderType,
+    table_number:
+      orderType === "dine-in" ? Number(orderData.table_number) : null,
+
+    payment_method: isDineInDeferred
+      ? "pending"
+      : orderData.payment_method || "cash",
+
+    status: isDineInDeferred ? "pending" : "paid",
+    paid_at: isDineInDeferred ? null : new Date(),
+
+    ...totals,
+
+    items: enrichedItems,
+    ingredientUsage,
+
+    createdAt: new Date(),
+    updatedAt: new Date(),
+
+    offlineCreatedAt: nowIso(),
+    syncedAt: null,
+    syncError: null,
+  };
+
+  addOfflineOrder(offlineOrder);
+
+  return {
+    data: offlineOrder,
+    error: null,
+    offline: true,
+  };
+}
+
+/* =========================================================
+   ONLINE ORDER SUBMIT
+========================================================= */
+
+async function submitOrderOnline(orderData, orderItems, serviceChargePercent) {
+  const cashierId = await getCurrentUserId();
+
+  const allowedOrderTypes = ["dine-in", "take-away", "delivery"];
+  const orderType = orderData.order_type || "take-away";
+
+  if (!allowedOrderTypes.includes(orderType)) {
+    throw new Error("Invalid order type");
+  }
+
+  let tableNumber = null;
+
+  if (orderType === "dine-in") {
+    tableNumber = Number(orderData.table_number);
+
+    if (!tableNumber) {
+      throw new Error("Table number is required for dine-in orders");
+    }
+
+    const tableCount = await getTableCount();
+
+    if (tableCount > 0 && (tableNumber < 1 || tableNumber > tableCount)) {
+      throw new Error(`Table number must be between 1 and ${tableCount}`);
+    }
+  }
+
+  const enrichedItems = await enrichOrderItems(orderItems);
+  const totals = calculateTotals(enrichedItems, serviceChargePercent, orderType);
+  const ingredientUsage = buildIngredientUsage(enrichedItems);
+
+  const result = await runTransaction(db, async (transaction) => {
+    const { counterRef, nextValue, orderNumber } =
+      await generateOrderNumberTx(transaction);
+
+    const orderRef = doc(collection(db, "orders"));
+
+    const movementWrites = await applyInventoryDeltaTx(
+      transaction,
+      ingredientUsage.map((u) => ({ ...u, qtyChange: u.qty })),
+      {
+        orderId: orderRef.id,
+        orderNumber,
+        cashierId,
+        reason: "order_submit",
+      }
+    );
+
+    const isDineInDeferred =
+      orderType === "dine-in" &&
+      (!orderData.payment_method || orderData.payment_method === "pending");
+
+    transaction.set(
+      counterRef,
+      {
+        value: nextValue,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    transaction.set(orderRef, {
+      orderNumber,
+      cashierId,
+
+      customer_name: orderData.customer_name || null,
+      customer_phone: orderData.customer_phone || null,
+      special_instructions: orderData.special_instructions || null,
+
+      order_type: orderType,
+      table_number: tableNumber,
+
+      payment_method: isDineInDeferred
+        ? "pending"
+        : orderData.payment_method || "cash",
+
+      status: isDineInDeferred ? "pending" : "paid",
+      paid_at: isDineInDeferred ? null : new Date(),
+
+      ...totals,
+
+      items: enrichedItems,
+      ingredientUsage,
+
+      isOffline: false,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    return {
+      id: orderRef.id,
+      orderNumber,
+      movementWrites,
+    };
+  });
+
+  if (result.movementWrites?.length) {
+    await Promise.all(
+      result.movementWrites.map((movement) =>
+        addDoc(collection(db, "stock_movements"), movement)
+      )
+    );
+  }
+
+  const savedOrderSnap = await getDoc(doc(db, "orders", result.id));
+
+  return {
+    data: savedOrderSnap.exists()
+      ? { id: savedOrderSnap.id, ...savedOrderSnap.data() }
+      : { id: result.id, orderNumber: result.orderNumber },
+    error: null,
+    offline: false,
+  };
+}
+
+/* =========================================================
+   PUBLIC: SUBMIT ORDER
 ========================================================= */
 
 export async function submitOrder(orderData, orderItems, serviceChargePercent) {
   try {
-    const cashierId = await getCurrentUserId();
-
-    const allowedOrderTypes = ["dine-in", "take-away", "delivery"];
-    const orderType = orderData.order_type || "take-away";
-
-    if (!allowedOrderTypes.includes(orderType)) {
-      throw new Error("Invalid order type");
+    if (!isOnline()) {
+      return await createOfflineOrder(orderData, orderItems, serviceChargePercent);
     }
 
-    let tableNumber = null;
-
-    if (orderType === "dine-in") {
-      tableNumber = Number(orderData.table_number);
-
-      if (!tableNumber) {
-        throw new Error("Table number is required for dine-in orders");
-      }
-
-      const tableCount = await getTableCount();
-
-      if (tableCount > 0 && (tableNumber < 1 || tableNumber > tableCount)) {
-        throw new Error(`Table number must be between 1 and ${tableCount}`);
-      }
-    }
-
-    const enrichedItems = await enrichOrderItems(orderItems);
-    const totals = calculateTotals(enrichedItems, serviceChargePercent, orderType);
-    const ingredientUsage = buildIngredientUsage(enrichedItems);
-
-    const result = await runTransaction(db, async (transaction) => {
-      // ✅ READ counter first
-      const { counterRef, nextValue, orderNumber } =
-        await generateOrderNumberTx(transaction);
-
-      const orderRef = doc(collection(db, "orders"));
-
-      // ✅ READ inventory inside applyInventoryDeltaTx before any writes
-      const movementWrites = await applyInventoryDeltaTx(
-        transaction,
-        ingredientUsage.map((u) => ({ ...u, qtyChange: u.qty })),
-        {
-          orderId: orderRef.id,
-          orderNumber,
-          cashierId,
-          reason: "order_submit",
-        }
-      );
-
-      const isDineInDeferred =
-        orderType === "dine-in" &&
-        (!orderData.payment_method || orderData.payment_method === "pending");
-
-      // ✅ WRITES start here
-      transaction.set(
-        counterRef,
-        {
-          value: nextValue,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-      transaction.set(orderRef, {
-        orderNumber,
-        cashierId,
-
-        customer_name: orderData.customer_name || null,
-        customer_phone: orderData.customer_phone || null,
-        special_instructions: orderData.special_instructions || null,
-
-        order_type: orderType,
-        table_number: tableNumber,
-
-        payment_method: isDineInDeferred
-          ? "pending"
-          : orderData.payment_method || "cash",
-
-        status: isDineInDeferred ? "pending" : "paid",
-        paid_at: isDineInDeferred ? null : new Date(),
-
-        ...totals,
-
-        items: enrichedItems,
-        ingredientUsage,
-
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-
-      return {
-        id: orderRef.id,
-        orderNumber,
-        movementWrites,
-      };
-    });
-
-    if (result.movementWrites?.length) {
-      await Promise.all(
-        result.movementWrites.map((movement) =>
-          addDoc(collection(db, "stock_movements"), movement)
-        )
-      );
-    }
-
-    const savedOrderSnap = await getDoc(doc(db, "orders", result.id));
-
-    return {
-      data: savedOrderSnap.exists()
-        ? { id: savedOrderSnap.id, ...savedOrderSnap.data() }
-        : { id: result.id, orderNumber: result.orderNumber },
-      error: null,
-    };
+    return await submitOrderOnline(orderData, orderItems, serviceChargePercent);
   } catch (error) {
     console.error("Order submission error:", error);
+
+    const message = String(error?.message || "").toLowerCase();
+
+    const shouldFallbackOffline =
+      !isOnline() ||
+      message.includes("offline") ||
+      message.includes("network") ||
+      message.includes("failed to fetch") ||
+      message.includes("unavailable");
+
+    if (shouldFallbackOffline) {
+      try {
+        return await createOfflineOrder(orderData, orderItems, serviceChargePercent);
+      } catch (offlineError) {
+        return { data: null, error: offlineError };
+      }
+    }
+
     return { data: null, error };
   }
 }
 
+/* =========================================================
+   SYNC OFFLINE ORDERS
+========================================================= */
+
+export async function syncOfflineOrders() {
+  if (!isOnline()) {
+    return {
+      synced: 0,
+      failed: 0,
+      pending: getPendingOfflineOrderCount(),
+      error: new Error("Device is offline"),
+    };
+  }
+
+  const offlineOrders = getOfflineOrders().filter(
+    (order) => order.syncStatus !== "synced"
+  );
+
+  let synced = 0;
+  let failed = 0;
+
+  for (const offlineOrder of offlineOrders) {
+    try {
+      updateOfflineOrder(offlineOrder.localId, {
+        syncStatus: "syncing",
+        syncError: null,
+      });
+
+      const orderData = {
+        customer_name: offlineOrder.customer_name,
+        customer_phone: offlineOrder.customer_phone,
+        special_instructions: offlineOrder.special_instructions,
+        payment_method: offlineOrder.payment_method,
+        order_type: offlineOrder.order_type,
+        table_number: offlineOrder.table_number,
+      };
+
+      const result = await submitOrderOnline(
+        orderData,
+        offlineOrder.items,
+        offlineOrder.service_charge_percent || 0
+      );
+
+      if (result.error) throw result.error;
+
+      removeOfflineOrder(offlineOrder.localId);
+      synced += 1;
+    } catch (error) {
+      failed += 1;
+
+      updateOfflineOrder(offlineOrder.localId, {
+        syncStatus: "failed",
+        syncError: error?.message || "Sync failed",
+      });
+
+      console.error("Offline order sync failed:", error);
+    }
+  }
+
+  return {
+    synced,
+    failed,
+    pending: getPendingOfflineOrderCount(),
+    error: null,
+  };
+}
+
+/* =========================================================
+   ORDER UPDATE ACTIONS
+========================================================= */
+
 export async function addItemsToOrder(orderId, newItems, serviceChargePercent) {
   try {
+    if (String(orderId).startsWith("offline_")) {
+      throw new Error("Offline order editing is not supported before sync.");
+    }
+
     const cashierId = await getCurrentUserId();
     const orderRef = doc(db, "orders", orderId);
     const preparedItems = await enrichOrderItems(newItems);
 
     const result = await runTransaction(db, async (transaction) => {
-      // ✅ READ order first
       const orderSnap = await transaction.get(orderRef);
 
-      if (!orderSnap.exists()) {
-        throw new Error("Order not found");
-      }
+      if (!orderSnap.exists()) throw new Error("Order not found");
 
       const order = orderSnap.data();
       const existingItems = Array.isArray(order.items) ? [...order.items] : [];
 
       for (const newItem of preparedItems) {
-        const existingIndex = existingItems.findIndex((item) => item.id === newItem.id);
+        const existingIndex = existingItems.findIndex(
+          (item) => item.id === newItem.id
+        );
 
         if (existingIndex >= 0) {
           const mergedQty =
@@ -451,7 +708,6 @@ export async function addItemsToOrder(orderId, newItems, serviceChargePercent) {
         order.order_type || "take-away"
       );
 
-      // ✅ READ inventory before writes
       const movementWrites = await applyInventoryDeltaTx(transaction, deltas, {
         orderId,
         orderNumber: order.orderNumber || null,
@@ -459,7 +715,6 @@ export async function addItemsToOrder(orderId, newItems, serviceChargePercent) {
         reason: "order_add_items",
       });
 
-      // ✅ WRITE order after all reads
       transaction.update(orderRef, {
         items: existingItems,
         ingredientUsage: newUsage,
@@ -500,9 +755,7 @@ export async function removeItemFromOrder(orderId, menuItemId, serviceChargePerc
     const result = await runTransaction(db, async (transaction) => {
       const orderSnap = await transaction.get(orderRef);
 
-      if (!orderSnap.exists()) {
-        throw new Error("Order not found");
-      }
+      if (!orderSnap.exists()) throw new Error("Order not found");
 
       const order = orderSnap.data();
       const currentItems = Array.isArray(order.items) ? order.items : [];
@@ -578,18 +831,13 @@ export async function updateItemQuantityInOrder(
     const result = await runTransaction(db, async (transaction) => {
       const orderSnap = await transaction.get(orderRef);
 
-      if (!orderSnap.exists()) {
-        throw new Error("Order not found");
-      }
+      if (!orderSnap.exists()) throw new Error("Order not found");
 
       const order = orderSnap.data();
       const currentItems = Array.isArray(order.items) ? [...order.items] : [];
 
       const itemIndex = currentItems.findIndex((item) => item.id === menuItemId);
-
-      if (itemIndex < 0) {
-        throw new Error("Item not found");
-      }
+      if (itemIndex < 0) throw new Error("Item not found");
 
       if (safeQty <= 0) {
         currentItems.splice(itemIndex, 1);
@@ -687,10 +935,7 @@ export async function deleteOrder(orderId) {
     const orderRef = doc(db, "orders", orderId);
 
     const orderSnap = await getDoc(orderRef);
-
-    if (!orderSnap.exists()) {
-      throw new Error("Order not found");
-    }
+    if (!orderSnap.exists()) throw new Error("Order not found");
 
     const order = orderSnap.data();
 
@@ -746,6 +991,16 @@ export async function deleteOrder(orderId) {
 
 export async function getOrderById(orderId) {
   try {
+    if (String(orderId).startsWith("offline_")) {
+      const offlineOrder = getOfflineOrders().find((o) => o.localId === orderId);
+
+      if (!offlineOrder) {
+        return { data: null, error: new Error("Offline order not found") };
+      }
+
+      return { data: offlineOrder, error: null };
+    }
+
     const snap = await getDoc(doc(db, "orders", orderId));
 
     if (!snap.exists()) {
@@ -764,6 +1019,8 @@ export async function getOrderById(orderId) {
 
 export async function getRecentOrders(limitCount = 20) {
   try {
+    const offlineOrders = getOfflineOrders();
+
     const q = query(
       collection(db, "orders"),
       orderBy("createdAt", "desc"),
@@ -772,12 +1029,21 @@ export async function getRecentOrders(limitCount = 20) {
 
     const snap = await getDocs(q);
 
+    const onlineOrders = snap.docs.map((d) => ({
+      id: d.id,
+      ...d.data(),
+    }));
+
     return {
-      data: snap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      data: [...offlineOrders, ...onlineOrders],
       error: null,
     };
   } catch (error) {
     console.error("Get recent orders error:", error);
-    return { data: null, error };
+
+    return {
+      data: getOfflineOrders(),
+      error: null,
+    };
   }
 }

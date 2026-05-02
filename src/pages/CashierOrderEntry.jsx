@@ -122,10 +122,14 @@ export default function CashierOrderEntry() {
     });
 
     const existingItem = orderItems.find((orderItem) => orderItem.id === item.id);
-    toast.success(existingItem ? `Added another ${item.name}` : `Added ${item.name}`, {
-      duration: 1500,
-      id: `add-${item.id}`,
-    });
+
+    toast.success(
+      existingItem ? `Added another ${item.name}` : `Added ${item.name}`,
+      {
+        duration: 1500,
+        id: `add-${item.id}`,
+      }
+    );
   }
 
   function clearOrder() {
@@ -146,6 +150,88 @@ export default function CashierOrderEntry() {
     );
   }
 
+  function buildReceiptFromSubmittedOrder(order) {
+    if (!order) return null;
+
+    const rawItems = Array.isArray(order.items) ? order.items : [];
+
+    const items = rawItems.map((item, index) => {
+      const quantity = Number(item.quantity ?? item.qty ?? 0);
+      const unitPrice = Number(item.price ?? item.unitPrice ?? 0);
+
+      return {
+        id: item.id || item.menuId || `item-${index}`,
+        name: item.name || "",
+        quantity,
+        unitPrice,
+        lineTotal: Number(
+          item.line_total ?? item.lineTotal ?? unitPrice * quantity
+        ),
+      };
+    });
+
+    return {
+      id: order.id || order.orderId || `offline-${Date.now()}`,
+      orderNumber:
+        order.orderNumber ||
+        order.order_number ||
+        order.localOrderNumber ||
+        `OFFLINE-${Date.now()}`,
+      timestamp:
+        typeof order.createdAt?.toDate === "function"
+          ? order.createdAt.toDate().toISOString()
+          : order.createdAt instanceof Date
+          ? order.createdAt.toISOString()
+          : new Date().toISOString(),
+      customerName: order.customer_name || order.customerName || null,
+      customerPhone: order.customer_phone || order.customerPhone || null,
+      specialInstructions:
+        order.special_instructions || order.specialInstructions || null,
+      paymentMethod: order.payment_method || order.paymentMethod || paymentMethod || "cash",
+      items,
+      itemIds: items.map((item) => item.id),
+      subtotal: Number(order.subtotal) || subtotal || 0,
+      serviceChargePercent:
+        Number(order.service_charge_percent ?? order.serviceChargePercent ?? 0) ||
+        0,
+      serviceChargeAmount:
+        Number(order.service_charge_amount ?? order.serviceChargeAmount ?? 0) ||
+        0,
+      total: Number(order.total) || total || 0,
+      orderType: order.order_type || order.orderType || orderType,
+      tableNumber:
+        order.table_number !== undefined && order.table_number !== null
+          ? Number(order.table_number)
+          : order.tableNumber !== undefined && order.tableNumber !== null
+          ? Number(order.tableNumber)
+          : orderType === "dine-in"
+          ? Number(tableNumber)
+          : null,
+      isOffline: Boolean(order.isOffline),
+      syncStatus: order.syncStatus || null,
+    };
+  }
+
+  async function loadReceiptForSubmittedOrder(orderData) {
+    if (!orderData?.id) {
+      return buildReceiptFromSubmittedOrder(orderData);
+    }
+
+    try {
+      const { data: receipt, error } = await getReceiptData(orderData.id);
+
+      if (!error && receipt) {
+        return receipt;
+      }
+
+      console.warn("Receipt fetch failed, using submitted order data:", error);
+      return buildReceiptFromSubmittedOrder(orderData);
+    } catch (err) {
+      console.warn("Receipt fetch crashed, using submitted order data:", err);
+      return buildReceiptFromSubmittedOrder(orderData);
+    }
+  }
+
   async function handleCheckout() {
     setSubmitting(true);
     setCheckoutError(null);
@@ -159,7 +245,7 @@ export default function CashierOrderEntry() {
       total,
       payment_method: paymentMethod,
       order_type: orderType,
-      table_number: orderType === "dine-in" ? parseInt(tableNumber, 10) : null,
+      table_number: null,
     };
 
     const serviceChargePercent = settings?.service_charge_percentage || 10;
@@ -183,15 +269,14 @@ export default function CashierOrderEntry() {
       }
 
       const orderNumber = data?.orderNumber || data?.order_number || "Order";
-      const { data: receipt, error: receiptError } = await getReceiptData(data.id);
+      const receipt = await loadReceiptForSubmittedOrder(data);
 
-      if (receiptError) {
-        console.error("Failed to fetch receipt data:", receiptError);
-        toast.success(`${orderNumber} completed successfully!`);
-      } else {
+      if (receipt) {
         setReceiptData(receipt);
         setShowCustomerReceiptModal(true);
       }
+
+      toast.success(`${orderNumber} completed successfully!`);
 
       setOrderItems([]);
       setCustomerName("");
@@ -209,6 +294,7 @@ export default function CashierOrderEntry() {
           ? "Order submission timed out. Please try again."
           : "Failed to submit order. Check internet connection."
       );
+    } finally {
       setSubmitting(false);
     }
   }
@@ -236,15 +322,14 @@ export default function CashierOrderEntry() {
       }
 
       const orderNumber = data?.orderNumber || data?.order_number || "Order";
-      const { data: receipt, error: receiptError } = await getReceiptData(data.id);
+      const receipt = await loadReceiptForSubmittedOrder(data);
 
-      if (receiptError) {
-        console.error("Failed to fetch receipt data:", receiptError);
-        toast.success(`${orderNumber} completed successfully!`);
-      } else {
+      if (receipt) {
         setReceiptData(receipt);
         setShowCustomerReceiptModal(true);
       }
+
+      toast.success(`${orderNumber} completed successfully!`);
 
       setOrderItems([]);
       setCustomerName("");
@@ -262,6 +347,7 @@ export default function CashierOrderEntry() {
           ? "Order submission timed out. Please try again."
           : "Failed to submit order. Check internet connection."
       );
+    } finally {
       setSubmitting(false);
     }
   }
@@ -297,13 +383,13 @@ export default function CashierOrderEntry() {
         return;
       }
 
-      const { data: receipt, error: receiptError } = await getReceiptData(data.id);
+      const receipt = await loadReceiptForSubmittedOrder(data);
 
-      if (receiptError) {
-        setDineInError("Order created, but failed to fetch kitchen slip.");
-      } else {
+      if (receipt) {
         setReceiptData(receipt);
         setShowKitchenReceiptModal(true);
+      } else {
+        setDineInError("Order created, but failed to prepare kitchen slip.");
       }
 
       setOrderItems([]);
@@ -316,9 +402,9 @@ export default function CashierOrderEntry() {
       setOrderType("take-away");
     } catch {
       setDineInError("Network error.");
+    } finally {
+      setDineInSubmitting(false);
     }
-
-    setDineInSubmitting(false);
   }
 
   async function handlePrintCustomer() {
@@ -440,6 +526,7 @@ export default function CashierOrderEntry() {
     setOrderItems((prevItems) =>
       prevItems.filter((item) => item.id !== itemToRemove.id)
     );
+
     toast.success(`Removed ${itemToRemove.name}`);
     setShowRemoveConfirm(false);
     setItemToRemove(null);
@@ -451,8 +538,6 @@ export default function CashierOrderEntry() {
   );
 
   const subtotal = useMemo(() => {
-    if (!orderItems || orderItems.length === 0) return 0;
-
     return orderItems.reduce((sum, item) => {
       const lineTotal = (Number(item.price) || 0) * (Number(item.quantity) || 0);
       return sum + lineTotal;
@@ -573,6 +658,7 @@ export default function CashierOrderEntry() {
                       </p>
                     )}
                   </div>
+
                   <div className="mt-2 pt-2 border-t border-gray-100">
                     <p className="text-teal-600 font-bold text-lg">
                       {formatCurrency(item.price)}
@@ -594,6 +680,7 @@ export default function CashierOrderEntry() {
                 {itemCount} {itemCount === 1 ? "item" : "items"}
               </p>
             </div>
+
             {orderItems.length > 0 && (
               <button
                 onClick={() => setShowClearConfirm(true)}
@@ -668,11 +755,7 @@ export default function CashierOrderEntry() {
                   onChange={(e) => setTableNumber(e.target.value)}
                   className="w-32 px-3 py-2 border rounded-md text-center border-gray-300 focus:ring-teal-500 focus:outline-none focus:ring-2"
                   placeholder={`1-${settings?.table_count || 10}`}
-                  data-testid="table-number-input"
                 />
-                <p className="mt-2 text-xs text-gray-500">
-                  Select table number for dine-in orders
-                </p>
               </div>
             )}
           </div>
@@ -681,6 +764,7 @@ export default function CashierOrderEntry() {
             <h3 className="text-sm font-medium text-gray-700 mb-2">
               Customer Info {orderType === "delivery" ? "(Recommended)" : "(Optional)"}
             </h3>
+
             <div className="space-y-2">
               <input
                 type="text"
@@ -689,6 +773,7 @@ export default function CashierOrderEntry() {
                 onChange={(e) => setCustomerName(e.target.value)}
                 className="w-full h-12 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 text-base"
               />
+
               <input
                 type="text"
                 placeholder="Phone Number"
@@ -696,6 +781,7 @@ export default function CashierOrderEntry() {
                 onChange={(e) => setCustomerPhone(e.target.value)}
                 className="w-full h-12 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 text-base"
               />
+
               <textarea
                 placeholder={
                   orderType === "delivery"
@@ -736,6 +822,7 @@ export default function CashierOrderEntry() {
                           {formatCurrency(item.price)} each
                         </p>
                       </div>
+
                       <div className="text-right ml-2">
                         <p className="font-bold text-teal-600">
                           {formatCurrency(lineTotal)}
@@ -747,7 +834,6 @@ export default function CashierOrderEntry() {
                       <button
                         onClick={() => decrementQuantity(item.id)}
                         className="w-11 h-11 flex items-center justify-center rounded-md border-2 border-teal-600 text-teal-600 hover:bg-teal-50 active:bg-teal-100 transition-colors font-semibold text-lg"
-                        aria-label="Decrease quantity"
                       >
                         −
                       </button>
@@ -759,7 +845,6 @@ export default function CashierOrderEntry() {
                       <button
                         onClick={() => incrementQuantity(item.id)}
                         className="w-11 h-11 flex items-center justify-center rounded-md border-2 border-teal-600 text-teal-600 hover:bg-teal-50 active:bg-teal-100 transition-colors font-semibold text-lg"
-                        aria-label="Increase quantity"
                       >
                         +
                       </button>
@@ -803,7 +888,6 @@ export default function CashierOrderEntry() {
             <div className="mt-6">
               <Button
                 onClick={() => setShowCheckoutModal(true)}
-                disabled={orderItems.length === 0}
                 className="w-full py-4 text-lg font-semibold bg-teal-600 hover:bg-teal-700 text-white"
               >
                 Complete Order
@@ -815,7 +899,7 @@ export default function CashierOrderEntry() {
             <div className="mt-6">
               <Button
                 onClick={() => setShowDineInModal(true)}
-                disabled={orderItems.length === 0 || !tableNumber}
+                disabled={!tableNumber}
                 className="w-full py-4 text-lg font-semibold bg-teal-600 hover:bg-teal-700 text-white"
               >
                 Confirm Dine-In & Print Kitchen Slip
@@ -846,10 +930,6 @@ export default function CashierOrderEntry() {
             <div className="flex justify-between mb-2">
               <span className="text-gray-600">Items:</span>
               <span className="font-medium">{itemCount}</span>
-            </div>
-            <div className="flex justify-between mb-2 text-base font-semibold">
-              <span>Subtotal:</span>
-              <span className="text-teal-600">{formatCurrency(subtotal)}</span>
             </div>
             <div className="flex justify-between text-lg font-bold border-t border-gray-300 pt-2">
               <span>Total:</span>
@@ -934,7 +1014,7 @@ export default function CashierOrderEntry() {
                   paymentMethod === "cash"
                     ? "border-teal-600 bg-teal-50 shadow-md"
                     : "border-gray-300 hover:border-gray-400"
-                } ${submitting ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                }`}
               >
                 <div className="text-4xl mb-2">💵</div>
                 <div className="font-medium">Cash</div>
@@ -947,7 +1027,7 @@ export default function CashierOrderEntry() {
                   paymentMethod === "card"
                     ? "border-teal-600 bg-teal-50 shadow-md"
                     : "border-gray-300 hover:border-gray-400"
-                } ${submitting ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                }`}
               >
                 <div className="text-4xl mb-2">💳</div>
                 <div className="font-medium">Card</div>
@@ -1094,6 +1174,7 @@ export default function CashierOrderEntry() {
               {printConfirmMessage}
             </p>
           </div>
+
           <Button
             variant="primary"
             onClick={() => {
@@ -1140,6 +1221,7 @@ export default function CashierOrderEntry() {
             </div>
             <p className="text-lg font-semibold text-gray-800">{printError}</p>
           </div>
+
           <Button
             variant="primary"
             onClick={() => setShowPrintError(false)}
