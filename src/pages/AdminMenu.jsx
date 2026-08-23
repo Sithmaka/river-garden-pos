@@ -12,6 +12,7 @@ import Button from "../components/ui/Button";
 import Modal from "../components/ui/Modal";
 import MenuItemForm from "../components/admin/MenuItemForm";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
+import ImportMenuCsvModal from "../components/admin/ImportMenuCsvModal";
 import { useMenu } from "../hooks/useMenu";
 import {
   createMenuItem,
@@ -48,6 +49,7 @@ export default function AdminMenu() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const [togglingItemId, setTogglingItemId] = useState(null);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   const showTemporarySuccess = (message, timeout = 3000) => {
     setSuccessMessage(message);
@@ -127,12 +129,6 @@ export default function AdminMenu() {
     setIsModalOpen(false);
     setEditingItem(null);
     setSubmitError(null);
-  };
-
-  const handleAddCategory = () => {
-    setIsCategoryModalOpen(true);
-    setNewCategoryName("");
-    setCategoryError(null);
   };
 
   const handleAddCategoryFromForm = () => {
@@ -255,6 +251,15 @@ export default function AdminMenu() {
     }
   };
 
+  const handleImportComplete = async ({ items, categories: categoryCount }) => {
+    await refetch();
+    setIsImportModalOpen(false);
+    showTemporarySuccess(
+      `Imported ${items} menu items and processed ${categoryCount} categories.`,
+      5000
+    );
+  };
+
   return (
     <div className="min-h-screen bg-white">
       {successMessage && (
@@ -280,7 +285,7 @@ export default function AdminMenu() {
             </Button>
           </div>
 
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">
                 Menu Management
@@ -290,7 +295,15 @@ export default function AdminMenu() {
               </p>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                onClick={() => setIsImportModalOpen(true)}
+                variant="secondary"
+                data-testid="import-menu-csv-button"
+              >
+                Import CSV
+              </Button>
+
               <Button
                 onClick={() => {
                   setCategoryError(null);
@@ -513,6 +526,13 @@ export default function AdminMenu() {
           </div>
         </div>
       </Modal>
+
+      <ImportMenuCsvModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        categories={categories}
+        onImported={handleImportComplete}
+      />
 
       <ConfirmDialog
         isOpen={showFirstConfirm}

@@ -14,7 +14,8 @@
     "build:electron-all": "npm run build && electron-builder -mwl",
     "lint": "eslint .",
     "preview": "vite preview",
-    "seed": "node scripts/seed.js"
+    "seed": "node scripts/seed.js",
+    "import:menu": "node scripts/importFirebaseMenu.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.78.0",

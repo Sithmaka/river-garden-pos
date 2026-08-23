@@ -17,8 +17,11 @@ import {
   where,
   orderBy,
   serverTimestamp,
+  Timestamp,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "./firebase";
+import { prepareMenuCsvImport } from "../utils/menuCsvImport";
 
 /* =========================================================
    HELPERS
@@ -31,6 +34,9 @@ function normalizeCategory(docSnap) {
     id: docSnap.id,
     key: data.key || "",
     name: data.name || "",
+    emoji: data.emoji || "",
+    sortOrder: Number(data.sortOrder ?? data.sort_order) || 0,
+    sort_order: Number(data.sortOrder ?? data.sort_order) || 0,
     createdAt: data.createdAt || null,
     updatedAt: data.updatedAt || null,
   };
@@ -121,6 +127,8 @@ export async function createCategory(categoryData) {
     const payload = {
       name,
       key,
+      emoji: categoryData.emoji || "",
+      sortOrder: Number(categoryData.sortOrder ?? categoryData.sort_order) || 0,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
@@ -166,6 +174,63 @@ export async function deleteCategory(categoryId, deleteItems = false) {
   } catch (error) {
     console.error("Error deleting menu category:", error);
     return { success: false, error };
+  }
+}
+
+function timestampOrServerTimestamp(value) {
+  return value instanceof Date ? Timestamp.fromDate(value) : serverTimestamp();
+}
+
+async function commitImportDocuments(collectionName, documents) {
+  const chunkSize = 400;
+
+  for (let offset = 0; offset < documents.length; offset += chunkSize) {
+    const batch = writeBatch(db);
+    for (const document of documents.slice(offset, offset + chunkSize)) {
+      const data = {
+        ...document.data,
+        createdAt: timestampOrServerTimestamp(document.data.createdAt),
+        updatedAt: timestampOrServerTimestamp(document.data.updatedAt),
+      };
+      batch.set(doc(db, collectionName, document.id), data, { merge: true });
+    }
+    await batch.commit();
+  }
+}
+
+export function validateMenuCsvImport(menuItemsText, categoriesText, existingCategories) {
+  return prepareMenuCsvImport({
+    menuItemsText,
+    categoriesText,
+    existingCategories,
+  });
+}
+
+export async function importMenuFromCsv(
+  menuItemsText,
+  categoriesText,
+  existingCategories
+) {
+  try {
+    const plan = validateMenuCsvImport(
+      menuItemsText,
+      categoriesText,
+      existingCategories
+    );
+
+    await commitImportDocuments("menu_categories", plan.categories);
+    await commitImportDocuments("menu_items", plan.items);
+
+    return {
+      data: {
+        categories: plan.categories.length,
+        items: plan.items.length,
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error("Error importing menu CSV:", error);
+    return { data: null, error };
   }
 }
 

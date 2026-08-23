@@ -1,0 +1,91 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function hasProfile() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function myProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActiveUser() {
+      return hasProfile() && myProfile().get('isActive', true) != false;
+    }
+
+    function isAdmin() {
+      return isActiveUser() && myProfile().get('role', '') == 'admin';
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow create: if isAdmin();
+      allow update: if isAdmin()
+        || (
+          request.auth.uid == uid
+          && request.resource.data.get('role', null) == resource.data.get('role', null)
+          && request.resource.data.get('isActive', true) == resource.data.get('isActive', true)
+        );
+      allow delete: if isAdmin();
+    }
+
+    match /items/{itemId} {
+      allow read, update: if isActiveUser();
+      allow create, delete: if isAdmin();
+    }
+
+    match /stock_movements/{moveId} {
+      allow read, create: if isActiveUser();
+      allow update, delete: if isAdmin();
+    }
+
+    match /menu_categories/{categoryId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    match /menu_items/{menuId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow read, create, update, delete: if isActiveUser();
+    }
+
+    match /counters/{counterId} {
+      allow read, write: if isActiveUser();
+    }
+
+    match /settings/{settingId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    match /integrations/{docId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    match /pos_mappings/{mapId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    match /pos_logs/{logId} {
+      allow read, create: if isActiveUser();
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
