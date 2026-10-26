@@ -174,6 +174,14 @@ function buildReceiptDataFromOrder(order) {
   };
 }
 
+function buildKitchenReceiptData(order, newItems) {
+  return buildReceiptDataFromOrder({
+    ...order,
+    items: newItems,
+    createdAt: new Date().toISOString(),
+  });
+}
+
 export default function WaiterOrderEntry() {
   const { orderId } = useParams();
   const navigate = useNavigate();
@@ -673,13 +681,7 @@ export default function WaiterOrderEntry() {
           return recalculateOfflineOrder(order, currentItems);
         });
 
-        const offlineReceipt = buildReceiptDataFromOrder({
-          ...updated,
-          items: orderItems,
-          subtotal: newItemsSubtotal,
-          service_charge_amount: 0,
-          total: newItemsSubtotal,
-        });
+        const offlineReceipt = buildKitchenReceiptData(updated, orderItems);
 
         refreshOfflineState(updated);
         setOrderItems([]);
@@ -702,16 +704,9 @@ export default function WaiterOrderEntry() {
         toast.success("Items sent to kitchen!");
         setOrderItems([]);
 
-        const { data: receipt, error: receiptError } = await getReceiptData(
-          orderId
-        );
-
-        if (!receiptError && receipt) {
-          setReceiptData(receipt);
-          setShowKitchenReceiptModal(true);
-        }
-
         if (data) {
+          setReceiptData(buildKitchenReceiptData(data, orderItems));
+          setShowKitchenReceiptModal(true);
           applyLoadedOrder(data, false);
         }
 
