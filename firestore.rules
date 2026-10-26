@@ -68,6 +68,11 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    match /printer_config/{configId} {
+      allow read: if isActiveUser();
+      allow create, update, delete: if isAdmin();
+    }
+
     match /integrations/{docId} {
       allow read: if isActiveUser();
       allow write: if isAdmin();
