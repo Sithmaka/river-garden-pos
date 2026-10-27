@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -17,7 +17,9 @@ import { formatCurrency } from "../utils/formatting";
 import { useNavigate } from "react-router-dom";
 
 function toInputDate(date) {
-  return date.toISOString().slice(0, 10);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate()
+  ).padStart(2, "0")}`;
 }
 
 function getMonthKey(date) {
@@ -61,15 +63,15 @@ export default function OrdersAnalysis() {
 
   const today = new Date();
 
-  const [fromDate, setFromDate] = useState(toInputDate(new Date(today.getFullYear(), 0, 1)));
+  const [fromDate, setFromDate] = useState(toInputDate(today));
   const [toDate, setToDate] = useState(toInputDate(today));
-  const [quickRange, setQuickRange] = useState("this-year");
+  const [quickRange, setQuickRange] = useState("today");
 
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  async function loadAnalysis() {
+  const loadAnalysis = useCallback(async () => {
     setLoading(true);
     setError("");
 
@@ -83,11 +85,11 @@ export default function OrdersAnalysis() {
     }
 
     setLoading(false);
-  }
+  }, [fromDate, toDate]);
 
   useEffect(() => {
     loadAnalysis();
-  }, [fromDate, toDate]);
+  }, [loadAnalysis]);
 
   function applyQuickRange(value) {
     setQuickRange(value);
@@ -100,6 +102,10 @@ export default function OrdersAnalysis() {
       setFromDate("");
       setToDate("");
       return;
+    }
+
+    if (value === "today") {
+      start = now;
     }
 
     if (value === "this-month") {
@@ -227,11 +233,11 @@ export default function OrdersAnalysis() {
   const topItem = menuItemRows[0];
 
   return (
-    <div className="min-h-screen bg-slate-100 p-6">
+    <div className="min-h-screen bg-slate-100 p-4 sm:p-6">
       <div className="max-w-7xl mx-auto space-y-6">
-        <div className="bg-white rounded-2xl shadow p-6">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div>
+        <div className="bg-white rounded-2xl shadow p-4 sm:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            <div className="min-w-0">
                 <Button
                 onClick={() => navigate("/admin/dashboard")}
                 className="mb-4 bg-slate-700 hover:bg-slate-800 text-white px-5 py-2"
@@ -239,30 +245,30 @@ export default function OrdersAnalysis() {
                 ← Go Back
                 </Button>
 
-                <h1 className="text-3xl font-bold text-slate-900">Orders Analysis</h1>
-                <p className="text-slate-500 mt-2 max-w-4xl">
-                Analyze order history by month with total sales, total orders, and service charge.
-                Use the calendar range filter to focus on any period. This page uses{" "}
-                <b>paid_at</b> as the transaction date, <b>total</b> as total sales, and{" "}
-                <b>service_charge_amount</b> as service charge.
+                <h1 className="text-2xl sm:text-3xl leading-tight font-bold text-slate-900">Orders Analysis</h1>
+                <p className="text-sm sm:text-base text-slate-500 mt-2 max-w-4xl">
+                  Review paid orders, sales, service charges, and menu item performance for any date range.
                 </p>
             </div>
 
             <Button
                 onClick={loadAnalysis}
-                className="bg-teal-600 hover:bg-teal-700 text-white px-5 py-2"
+                className="w-full sm:w-auto bg-teal-600 hover:bg-teal-700 text-white px-5 py-2"
             >
                 Refresh
             </Button>
             </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
             <div>
               <label className="block text-sm font-bold text-slate-500 mb-2">From</label>
               <input
                 type="date"
                 value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
+                onChange={(e) => {
+                  setFromDate(e.target.value);
+                  setQuickRange("custom");
+                }}
                 className="w-full h-12 rounded-xl border border-slate-200 px-4 font-semibold"
               />
             </div>
@@ -272,7 +278,10 @@ export default function OrdersAnalysis() {
               <input
                 type="date"
                 value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
+                onChange={(e) => {
+                  setToDate(e.target.value);
+                  setQuickRange("custom");
+                }}
                 className="w-full h-12 rounded-xl border border-slate-200 px-4 font-semibold"
               />
             </div>
@@ -284,6 +293,8 @@ export default function OrdersAnalysis() {
                 onChange={(e) => applyQuickRange(e.target.value)}
                 className="w-full h-12 rounded-xl border border-slate-200 px-4 font-semibold bg-white"
               >
+                <option value="custom" disabled>Custom Range</option>
+                <option value="today">Today</option>
                 <option value="all">All Dates</option>
                 <option value="this-month">This Month</option>
                 <option value="last-30">Last 30 Days</option>

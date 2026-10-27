@@ -9,7 +9,7 @@ function startOfDay(dateStr) {
 
 function endOfDay(dateStr) {
   if (!dateStr) return null;
-  const date = new Date(`${dateStr}T23:59:59`);
+  const date = new Date(`${dateStr}T23:59:59.999`);
   return date;
 }
 

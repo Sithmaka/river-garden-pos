@@ -14,7 +14,7 @@ import Button from '../ui/Button';
 
 export default function Header() {
   const { user, role, signOut } = useAuth();
-  const { isAdmin, isCashier } = useTheme();
+  const { isAdmin } = useTheme();
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -34,17 +34,18 @@ export default function Header() {
 
   return (
     <header className={`${headerBg} text-white shadow-lg`}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between min-h-16 py-2 gap-2">
           {/* App Logo/Title */}
-          <div className="flex items-center">
-            <h1 className="text-xl font-bold">
-              River Garden POS
+          <div className="flex items-center min-w-0">
+            <h1 className="text-base sm:text-xl font-bold whitespace-nowrap">
+              <span className="sm:hidden">RG POS</span>
+              <span className="hidden sm:inline">River Garden POS</span>
             </h1>
           </div>
 
           {/* User Info and Logout */}
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4">
             {/* User Email - Hidden on mobile */}
             <div className="hidden sm:block text-sm">
               {user?.email}
@@ -52,7 +53,7 @@ export default function Header() {
 
             {/* Role Badge */}
             <span 
-              className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${badgeBg} text-white`}
+              className={`inline-flex items-center px-2 sm:px-3 py-1 rounded-full text-xs font-semibold ${badgeBg} text-white`}
               data-testid="header-role-badge"
             >
               {role?.toUpperCase()}
@@ -76,7 +77,7 @@ export default function Header() {
             <Button
               onClick={handleLogout}
               variant="danger"
-              className="text-sm"
+              className="text-xs sm:text-sm !px-3 sm:!px-4 whitespace-nowrap"
               data-testid="logout-button"
             >
               Logout
