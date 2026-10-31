@@ -47,6 +47,11 @@ function normalizeReceiptData(order, id) {
       Number(order.service_charge_percent ?? order.serviceChargePercent ?? 0) || 0,
     serviceChargeAmount:
       Number(order.service_charge_amount ?? order.serviceChargeAmount ?? 0) || 0,
+    discountType: order.discount_type || order.discountType || null,
+    discountValue:
+      Number(order.discount_value ?? order.discountValue ?? 0) || 0,
+    discountAmount:
+      Number(order.discount_amount ?? order.discountAmount ?? 0) || 0,
     total: Number(order.total) || 0,
     orderType: order.order_type || order.orderType || null,
     tableNumber:

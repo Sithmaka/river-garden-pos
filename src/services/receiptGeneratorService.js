@@ -289,6 +289,21 @@ export class ReceiptGeneratorService {
             `
         : "";
 
+    const discountAmount = Number(receiptData.discountAmount) || 0;
+    const discountLabel =
+      receiptData.discountType === "percentage"
+        ? `Discount (${formatCurrency(receiptData.discountValue)}%)`
+        : "Discount";
+    const discountHTML =
+      discountAmount > 0
+        ? `
+              <div class="total-line">
+                <span>${discountLabel}:</span>
+                <span>- ${currencyCode} ${formatCurrency(discountAmount)}</span>
+              </div>
+            `
+        : "";
+
     return `
       <html>
         <head>
@@ -351,6 +366,7 @@ export class ReceiptGeneratorService {
     )}</span>
               </div>
               ${serviceChargeHTML}
+              ${discountHTML}
               <div class="total-line grand-total">
                 <span>TOTAL:</span>
                 <span>${currencyCode} ${formatCurrency(

@@ -92,6 +92,18 @@ export default function Receipt({ receiptData, settings }) {
             </span>
             <span>{formatCurrency(receiptData.serviceChargeAmount || 0)}</span>
           </div>
+          {Number(receiptData.discountAmount) > 0 && (
+            <div className="total-line">
+              <span>
+                Discount
+                {receiptData.discountType === "percentage"
+                  ? ` (${receiptData.discountValue}%)`
+                  : ""}
+                :
+              </span>
+              <span>- {formatCurrency(receiptData.discountAmount)}</span>
+            </div>
+          )}
           <div className="total-line grand-total">
             <span>TOTAL:</span>
             <span>{formatCurrency(receiptData.total || 0)}</span>

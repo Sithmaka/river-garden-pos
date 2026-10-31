@@ -4,6 +4,7 @@ import { useMenu } from "../hooks/useMenu";
 import { usePrinterConfiguration } from "../hooks/usePrinterConfiguration";
 import { printerService } from "../services/printerService";
 import { formatCurrency } from "../utils/formatting";
+import { calculateBillDiscount } from "../utils/discount";
 import { getSettings } from "../services/settingsService";
 import { submitOrder } from "../services/orderService";
 import { getReceiptData } from "../services/receiptService";
@@ -32,6 +33,8 @@ export default function CashierOrderEntry() {
 
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("");
+  const [discountType, setDiscountType] = useState("amount");
+  const [discountValue, setDiscountValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [checkoutError, setCheckoutError] = useState(null);
   const [pendingOrderData, setPendingOrderData] = useState(null);
@@ -138,6 +141,8 @@ export default function CashierOrderEntry() {
     setCustomerPhone("");
     setSpecialInstructions("");
     setPaymentMethod("");
+    setDiscountType("amount");
+    setDiscountValue("");
     setTableNumber("");
     setOrderType("take-away");
     setShowClearConfirm(false);
@@ -197,6 +202,11 @@ export default function CashierOrderEntry() {
       serviceChargeAmount:
         Number(order.service_charge_amount ?? order.serviceChargeAmount ?? 0) ||
         0,
+      discountType: order.discount_type || order.discountType || null,
+      discountValue:
+        Number(order.discount_value ?? order.discountValue ?? 0) || 0,
+      discountAmount:
+        Number(order.discount_amount ?? order.discountAmount ?? 0) || 0,
       total: Number(order.total) || total || 0,
       orderType: order.order_type || order.orderType || orderType,
       tableNumber:
@@ -242,6 +252,9 @@ export default function CashierOrderEntry() {
       special_instructions: specialInstructions || null,
       subtotal,
       service_charge_amount: serviceChargeAmount,
+      discount_type: appliedDiscount.discountType,
+      discount_value: appliedDiscount.discountValue,
+      discount_amount: appliedDiscount.discountAmount,
       total,
       payment_method: paymentMethod,
       order_type: orderType,
@@ -283,6 +296,8 @@ export default function CashierOrderEntry() {
       setCustomerPhone("");
       setSpecialInstructions("");
       setPaymentMethod("");
+      setDiscountType("amount");
+      setDiscountValue("");
       setPendingOrderData(null);
       setCheckoutError(null);
       setShowCheckoutModal(false);
@@ -336,6 +351,8 @@ export default function CashierOrderEntry() {
       setCustomerPhone("");
       setSpecialInstructions("");
       setPaymentMethod("");
+      setDiscountType("amount");
+      setDiscountValue("");
       setPendingOrderData(null);
       setCheckoutError(null);
       setShowCheckoutModal(false);
@@ -553,9 +570,22 @@ export default function CashierOrderEntry() {
     return Math.round(charge * 100) / 100;
   }, [subtotal, settings, orderType]);
 
-  const total = useMemo(() => {
+  const grossTotal = useMemo(() => {
     return Math.round((subtotal + serviceChargeAmount) * 100) / 100;
   }, [subtotal, serviceChargeAmount]);
+
+  const appliedDiscount = useMemo(
+    () =>
+      calculateBillDiscount(
+        grossTotal,
+        discountType,
+        isCheckoutOrder ? discountValue : 0
+      ),
+    [discountType, discountValue, grossTotal, isCheckoutOrder]
+  );
+
+  const discountAmount = appliedDiscount.discountAmount;
+  const total = appliedDiscount.total;
 
   if (loading) {
     return (
@@ -877,6 +907,20 @@ export default function CashierOrderEntry() {
                 </span>
               </div>
 
+              {discountAmount > 0 && (
+                <div className="flex justify-between text-sm text-emerald-700">
+                  <span>
+                    Discount
+                    {appliedDiscount.discountType === "percentage"
+                      ? ` (${appliedDiscount.discountValue}%)`
+                      : ""}
+                  </span>
+                  <span className="font-medium">
+                    - {formatCurrency(discountAmount)}
+                  </span>
+                </div>
+              )}
+
               <div className="flex justify-between text-lg font-bold border-t border-gray-300 pt-2 mt-2">
                 <span className="text-gray-900">Total</span>
                 <span className="text-teal-600">{formatCurrency(total)}</span>
@@ -964,6 +1008,8 @@ export default function CashierOrderEntry() {
           if (!submitting) {
             setShowCheckoutModal(false);
             setPaymentMethod("");
+            setDiscountType("amount");
+            setDiscountValue("");
             setCheckoutError(null);
             setPendingOrderData(null);
           }
@@ -996,9 +1042,59 @@ export default function CashierOrderEntry() {
               <span className="text-gray-600">Items:</span>
               <span className="font-medium">{itemCount}</span>
             </div>
+            {discountAmount > 0 && (
+              <div className="flex justify-between mb-2 text-emerald-700">
+                <span>
+                  Discount
+                  {appliedDiscount.discountType === "percentage"
+                    ? ` (${appliedDiscount.discountValue}%)`
+                    : ""}
+                  :
+                </span>
+                <span className="font-medium">
+                  - {formatCurrency(discountAmount)}
+                </span>
+              </div>
+            )}
             <div className="flex justify-between text-lg font-bold">
               <span>Total:</span>
               <span className="text-teal-600">{formatCurrency(total)}</span>
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <h3 className="text-sm font-medium text-gray-700 mb-3">
+              Bill Discount (Optional)
+            </h3>
+            <div className="grid grid-cols-2 gap-3">
+              <select
+                value={discountType}
+                onChange={(e) => {
+                  setDiscountType(e.target.value);
+                  setDiscountValue("");
+                }}
+                disabled={submitting}
+                className="w-full rounded-lg border border-gray-300 px-3 py-3 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+              >
+                <option value="amount">Amount</option>
+                <option value="percentage">Percentage</option>
+              </select>
+              <div className="relative">
+                <input
+                  type="number"
+                  min="0"
+                  max={discountType === "percentage" ? "100" : undefined}
+                  step="0.01"
+                  value={discountValue}
+                  onChange={(e) => setDiscountValue(e.target.value)}
+                  disabled={submitting}
+                  placeholder="0"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-3 pr-10 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500">
+                  {discountType === "percentage" ? "%" : settings?.currency_code || "LKR"}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -1041,6 +1137,8 @@ export default function CashierOrderEntry() {
               onClick={() => {
                 setShowCheckoutModal(false);
                 setPaymentMethod("");
+                setDiscountType("amount");
+                setDiscountValue("");
               }}
               disabled={submitting}
               className="flex-1"

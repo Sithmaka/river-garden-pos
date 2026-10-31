@@ -8,7 +8,6 @@ import {
   getDoc,
   getDocs,
   addDoc,
-  updateDoc,
   query,
   orderBy,
   limit,
@@ -16,6 +15,7 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { auth, db } from "./firebase";
+import { calculateBillDiscount } from "../utils/discount";
 
 const OFFLINE_ORDERS_KEY = "codebell_offline_orders";
 
@@ -67,7 +67,12 @@ function normalizeOrderItem(item = {}) {
   };
 }
 
-function calculateTotals(orderItems = [], serviceChargePercent = 0, orderType = "take-away") {
+function calculateTotals(
+  orderItems = [],
+  serviceChargePercent = 0,
+  orderType = "take-away",
+  discount = {}
+) {
   const subtotal = round2(
     orderItems.reduce((sum, item) => sum + (Number(item.line_total) || 0), 0)
   );
@@ -82,13 +87,21 @@ function calculateTotals(orderItems = [], serviceChargePercent = 0, orderType = 
     ? round2(subtotal * (service_charge_percent / 100))
     : 0;
 
-  const total = round2(subtotal + service_charge_amount);
+  const grossTotal = round2(subtotal + service_charge_amount);
+  const appliedDiscount = calculateBillDiscount(
+    grossTotal,
+    discount.discount_type ?? discount.discountType,
+    discount.discount_value ?? discount.discountValue
+  );
 
   return {
     subtotal,
     service_charge_percent,
     service_charge_amount,
-    total,
+    discount_type: appliedDiscount.discountType,
+    discount_value: appliedDiscount.discountValue,
+    discount_amount: appliedDiscount.discountAmount,
+    total: appliedDiscount.total,
   };
 }
 
@@ -376,7 +389,12 @@ async function createOfflineOrder(orderData, orderItems, serviceChargePercent) {
   const orderNumber = createOfflineOrderNumber();
 
   const enrichedItems = orderItems.map(normalizeOrderItem);
-  const totals = calculateTotals(enrichedItems, serviceChargePercent, orderType);
+  const totals = calculateTotals(
+    enrichedItems,
+    serviceChargePercent,
+    orderType,
+    orderData
+  );
   const ingredientUsage = buildIngredientUsage(enrichedItems);
 
   const isDineInDeferred =
@@ -463,7 +481,12 @@ async function submitOrderOnline(orderData, orderItems, serviceChargePercent) {
   }
 
   const enrichedItems = await enrichOrderItems(orderItems);
-  const totals = calculateTotals(enrichedItems, serviceChargePercent, orderType);
+  const totals = calculateTotals(
+    enrichedItems,
+    serviceChargePercent,
+    orderType,
+    orderData
+  );
   const ingredientUsage = buildIngredientUsage(enrichedItems);
 
   const result = await runTransaction(db, async (transaction) => {
@@ -620,6 +643,8 @@ export async function syncOfflineOrders() {
         payment_method: offlineOrder.payment_method,
         order_type: offlineOrder.order_type,
         table_number: offlineOrder.table_number,
+        discount_type: offlineOrder.discount_type,
+        discount_value: offlineOrder.discount_value,
       };
 
       const result = await submitOrderOnline(
@@ -705,7 +730,8 @@ export async function addItemsToOrder(orderId, newItems, serviceChargePercent) {
       const totals = calculateTotals(
         existingItems,
         serviceChargePercent,
-        order.order_type || "take-away"
+        order.order_type || "take-away",
+        order
       );
 
       const movementWrites = await applyInventoryDeltaTx(transaction, deltas, {
@@ -775,7 +801,8 @@ export async function removeItemFromOrder(orderId, menuItemId, serviceChargePerc
       const totals = calculateTotals(
         updatedItems,
         serviceChargePercent,
-        order.order_type || "take-away"
+        order.order_type || "take-away",
+        order
       );
 
       const movementWrites = await applyInventoryDeltaTx(transaction, deltas, {
@@ -858,7 +885,8 @@ export async function updateItemQuantityInOrder(
       const totals = calculateTotals(
         currentItems,
         serviceChargePercent,
-        order.order_type || "take-away"
+        order.order_type || "take-away",
+        order
       );
 
       const movementWrites = await applyInventoryDeltaTx(transaction, deltas, {
@@ -900,15 +928,34 @@ export async function updateItemQuantityInOrder(
   }
 }
 
-export async function closeOrderAsPaid(orderId, paymentMethod) {
+export async function closeOrderAsPaid(orderId, paymentMethod, discount = {}) {
   try {
     const orderRef = doc(db, "orders", orderId);
 
-    await updateDoc(orderRef, {
-      status: "paid",
-      payment_method: paymentMethod,
-      paid_at: new Date(),
-      updatedAt: serverTimestamp(),
+    await runTransaction(db, async (transaction) => {
+      const orderSnap = await transaction.get(orderRef);
+      if (!orderSnap.exists()) throw new Error("Order not found");
+
+      const order = orderSnap.data();
+      const grossTotal =
+        (Number(order.subtotal) || 0) +
+        (Number(order.service_charge_amount) || 0);
+      const appliedDiscount = calculateBillDiscount(
+        grossTotal,
+        discount.discount_type ?? discount.discountType,
+        discount.discount_value ?? discount.discountValue
+      );
+
+      transaction.update(orderRef, {
+        status: "paid",
+        payment_method: paymentMethod,
+        discount_type: appliedDiscount.discountType,
+        discount_value: appliedDiscount.discountValue,
+        discount_amount: appliedDiscount.discountAmount,
+        total: appliedDiscount.total,
+        paid_at: new Date(),
+        updatedAt: serverTimestamp(),
+      });
     });
 
     const updatedOrderSnap = await getDoc(orderRef);

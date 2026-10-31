@@ -1,6 +1,6 @@
 // src/pages/WaiterOrderEntry.jsx
 
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Trash2 } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
@@ -9,6 +9,7 @@ import { useMenu } from "../hooks/useMenu";
 import { usePrinterConfiguration } from "../hooks/usePrinterConfiguration";
 import { printerService } from "../services/printerService";
 import { formatCurrency } from "../utils/formatting";
+import { calculateBillDiscount } from "../utils/discount";
 import { getSettings } from "../services/settingsService";
 import {
   submitOrder,
@@ -26,7 +27,6 @@ import KitchenReceipt from "../components/cashier/KitchenReceipt";
 import CustomerReceipt from "../components/cashier/CustomerReceipt";
 
 const OFFLINE_ORDERS_KEY = "codebell_offline_orders";
-const OFFLINE_SYNC_MAP_KEY = "offline_order_sync_map";
 
 function round2(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
@@ -76,14 +76,6 @@ function getOfflineOrders() {
 function saveOfflineOrders(orders) {
   localStorage.setItem("codebell_offline_orders", JSON.stringify(orders));
   localStorage.setItem("offline_orders", JSON.stringify(orders)); // temporary compatibility
-}
-
-function getSyncMap() {
-  try {
-    return JSON.parse(localStorage.getItem(OFFLINE_SYNC_MAP_KEY) || "{}");
-  } catch {
-    return {};
-  }
 }
 
 function getOfflineOrderById(id) {
@@ -163,6 +155,11 @@ function buildReceiptDataFromOrder(order) {
     serviceChargeAmount:
       Number(order.service_charge_amount ?? order.serviceChargeAmount ?? 0) ||
       0,
+    discountType: order.discount_type || order.discountType || null,
+    discountValue:
+      Number(order.discount_value ?? order.discountValue ?? 0) || 0,
+    discountAmount:
+      Number(order.discount_amount ?? order.discountAmount ?? 0) || 0,
     total: Number(order.total) || 0,
     orderType: order.order_type || order.orderType || "dine-in",
     tableNumber:
@@ -180,6 +177,24 @@ function buildKitchenReceiptData(order, newItems) {
     items: newItems,
     createdAt: new Date().toISOString(),
   });
+}
+
+function normalizeExistingItem(item = {}, index = 0) {
+  const price = Number(item.price ?? item.unit_price ?? item.unitPrice ?? 0);
+  const quantity = Number(item.quantity ?? 0);
+
+  return {
+    id:
+      item.id ||
+      item.menu_item_id ||
+      item.menuItemId ||
+      `existing-${index}-${item.name || item.menu_item_name || "item"}`,
+    name: item.name || item.menu_item_name || item.menuItemName || "Unnamed",
+    price,
+    quantity,
+    line_total: Number(item.line_total ?? item.lineTotal ?? price * quantity),
+    ingredients: Array.isArray(item.ingredients) ? item.ingredients : [],
+  };
 }
 
 export default function WaiterOrderEntry() {
@@ -208,6 +223,8 @@ export default function WaiterOrderEntry() {
   const [showFinishModal, setShowFinishModal] = useState(false);
   const [finishSubmitting, setFinishSubmitting] = useState(false);
   const [finishError, setFinishError] = useState(null);
+  const [discountType, setDiscountType] = useState("amount");
+  const [discountValue, setDiscountValue] = useState("");
 
   const [showCustomerReceiptModal, setShowCustomerReceiptModal] =
     useState(false);
@@ -222,30 +239,9 @@ export default function WaiterOrderEntry() {
   const [quantityConfirmData, setQuantityConfirmData] = useState(null);
 
   const isPrintingRef = useRef(false);
-  const hasShownMissingToastRef = useRef(false);
-
-  const isOfflineRoute = String(orderId || "").startsWith("offline_");
   const isOfflineOrder = !!existingOrder?.isOffline;
 
-  function normalizeExistingItem(item = {}, index = 0) {
-    const price = Number(item.price ?? item.unit_price ?? item.unitPrice ?? 0);
-    const quantity = Number(item.quantity ?? 0);
-
-    return {
-      id:
-        item.id ||
-        item.menu_item_id ||
-        item.menuItemId ||
-        `existing-${index}-${item.name || item.menu_item_name || "item"}`,
-      name: item.name || item.menu_item_name || item.menuItemName || "Unnamed",
-      price,
-      quantity,
-      line_total: Number(item.line_total ?? item.lineTotal ?? price * quantity),
-      ingredients: Array.isArray(item.ingredients) ? item.ingredients : [],
-    };
-  }
-
-  function applyLoadedOrder(order, isOffline = false) {
+  const applyLoadedOrder = useCallback((order, isOffline = false) => {
     const normalizedOrder = {
       ...order,
       id: order.offlineId || order.id,
@@ -263,7 +259,7 @@ export default function WaiterOrderEntry() {
 
     setEditableExistingItems(normalizedItems);
     setOrderItems([]);
-  }
+  }, []);
 
   useEffect(() => {
     async function loadInitialData() {
@@ -278,14 +274,6 @@ export default function WaiterOrderEntry() {
       }
 
       if (String(orderId).startsWith("offline_")) {
-        const syncMap = getSyncMap();
-        const syncedId = syncMap[orderId];
-
-        // if (syncedId && navigator.onLine) {
-        //   navigate(`/waiter/order/${syncedId}`, { replace: true });
-        //   return;
-        // }
-
         const offlineOrder = getOfflineOrderById(orderId);
 
         if (!offlineOrder) {
@@ -317,7 +305,7 @@ export default function WaiterOrderEntry() {
     }
 
     loadInitialData();
-  }, [orderId, navigate]);
+  }, [orderId, navigate, applyLoadedOrder]);
 
   const categories = useMemo(() => {
     if (!menuItems?.length) return [];
@@ -359,6 +347,31 @@ export default function WaiterOrderEntry() {
       0
     );
   }, [orderItems]);
+
+  const checkoutGrossTotal = useMemo(() => {
+    if (!receiptData) return 0;
+    return round2(
+      (Number(receiptData.subtotal) || 0) +
+        (Number(receiptData.serviceChargeAmount) || 0)
+    );
+  }, [receiptData]);
+
+  const checkoutDiscount = useMemo(
+    () => calculateBillDiscount(checkoutGrossTotal, discountType, discountValue),
+    [checkoutGrossTotal, discountType, discountValue]
+  );
+
+  const checkoutReceiptData = useMemo(() => {
+    if (!receiptData) return null;
+
+    return {
+      ...receiptData,
+      discountType: checkoutDiscount.discountType,
+      discountValue: checkoutDiscount.discountValue,
+      discountAmount: checkoutDiscount.discountAmount,
+      total: checkoutDiscount.total,
+    };
+  }, [checkoutDiscount, receiptData]);
 
   function recalculateOfflineOrder(order, nextItems) {
     const subtotal = round2(
@@ -810,6 +823,8 @@ export default function WaiterOrderEntry() {
 
     setFinishSubmitting(true);
     setFinishError(null);
+    setDiscountType("amount");
+    setDiscountValue("");
 
     try {
       if (isOfflineOrder) {
@@ -850,10 +865,22 @@ export default function WaiterOrderEntry() {
 
     try {
       if (isOfflineOrder) {
+        const grossTotal =
+          (Number(existingOrder.subtotal) || 0) +
+          (Number(existingOrder.service_charge_amount) || 0);
+        const appliedDiscount = calculateBillDiscount(
+          grossTotal,
+          discountType,
+          discountValue
+        );
         const updated = updateOfflineOrder(orderId, (order) => ({
           ...order,
           status: "paid",
           payment_method: paymentMethod,
+          discount_type: appliedDiscount.discountType,
+          discount_value: appliedDiscount.discountValue,
+          discount_amount: appliedDiscount.discountAmount,
+          total: appliedDiscount.total,
           paid_at: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           needsSync: true,
@@ -868,7 +895,10 @@ export default function WaiterOrderEntry() {
         return;
       }
 
-      const { error } = await closeOrderAsPaid(orderId, paymentMethod);
+      const { error } = await closeOrderAsPaid(orderId, paymentMethod, {
+        discount_type: checkoutDiscount.discountType,
+        discount_value: checkoutDiscount.discountValue,
+      });
 
       if (error) {
         setFinishError(error.message || "Failed to mark order as paid.");
@@ -1262,8 +1292,54 @@ export default function WaiterOrderEntry() {
         maxWidth="max-w-2xl"
       >
         <div className="p-6">
+          <div className="mb-6 rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">
+              Bill Discount (Optional)
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <select
+                value={discountType}
+                onChange={(e) => {
+                  setDiscountType(e.target.value);
+                  setDiscountValue("");
+                }}
+                className="w-full rounded-lg border border-gray-300 px-3 py-3 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+              >
+                <option value="amount">Amount</option>
+                <option value="percentage">Percentage</option>
+              </select>
+              <div className="relative">
+                <input
+                  type="number"
+                  min="0"
+                  max={discountType === "percentage" ? "100" : undefined}
+                  step="0.01"
+                  value={discountValue}
+                  onChange={(e) => setDiscountValue(e.target.value)}
+                  placeholder="0"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-3 pr-10 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500">
+                  {discountType === "percentage"
+                    ? "%"
+                    : settings?.currency_code || "LKR"}
+                </span>
+              </div>
+            </div>
+            {checkoutDiscount.discountAmount > 0 && (
+              <div className="flex justify-between mt-3 pt-3 border-t border-gray-200 text-sm">
+                <span className="text-emerald-700">
+                  Discount: - {formatCurrency(checkoutDiscount.discountAmount)}
+                </span>
+                <span className="font-bold text-teal-700">
+                  Total: {formatCurrency(checkoutDiscount.total)}
+                </span>
+              </div>
+            )}
+          </div>
+
           <div className="mb-6 border border-gray-200 rounded">
-            <CustomerReceipt receiptData={receiptData} settings={settings} />
+            <CustomerReceipt receiptData={checkoutReceiptData} settings={settings} />
           </div>
 
           <div className="flex gap-3">
