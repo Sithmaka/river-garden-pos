@@ -81,6 +81,7 @@ function normalizeMenuItem(docSnap, categoryMap = {}) {
     price: sellingPrice,
     sellingPrice,
     costPrice,
+    profitMonitorEnabled: data.profitMonitorEnabled === true,
     is_available: data.is_available ?? data.isAvailable ?? data.isActive ?? true,
     isAvailable: data.isAvailable ?? data.is_available ?? data.isActive ?? true,
     isActive: data.isActive ?? data.isAvailable ?? data.is_available ?? true,
@@ -455,6 +456,34 @@ export async function updateMenuItem(itemId, updates) {
     return { data, error: null };
   } catch (error) {
     console.error("❌ Unexpected error updating menu item:", error);
+    return { data: null, error };
+  }
+}
+
+export async function updateMenuItemProfitTracking(
+  itemId,
+  { enabled, costPrice }
+) {
+  try {
+    const itemRef = doc(db, "menu_items", itemId);
+    const safeCostPrice = Math.max(0, Number(costPrice) || 0);
+
+    await updateDoc(itemRef, {
+      profitMonitorEnabled: enabled === true,
+      costPrice: safeCostPrice,
+      updatedAt: serverTimestamp(),
+    });
+
+    return {
+      data: {
+        id: itemId,
+        profitMonitorEnabled: enabled === true,
+        costPrice: safeCostPrice,
+      },
+      error: null,
+    };
+  } catch (error) {
+    console.error("Error updating item profit tracking:", error);
     return { data: null, error };
   }
 }
