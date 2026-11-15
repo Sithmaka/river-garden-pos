@@ -19,6 +19,7 @@ export async function getSettings() {
           restaurant_address: "",
           restaurant_phone: "",
           table_count: 10,
+          allow_cashier_modify_kot_items: false,
         },
         error: null,
       };
@@ -35,6 +36,8 @@ export async function getSettings() {
         restaurant_address: data.restaurant_address ?? "",
         restaurant_phone: data.restaurant_phone ?? "",
         table_count: data.table_count ?? 10,
+        allow_cashier_modify_kot_items:
+          data.allow_cashier_modify_kot_items === true,
       },
       error: null,
     };
@@ -54,7 +57,8 @@ export async function updateSettings(
   receiptFooter,
   restaurantAddress,
   restaurantPhone,
-  tableCount
+  tableCount,
+  allowCashierModifyKotItems = false
 ) {
   try {
     const ref = doc(db, "settings", "restaurant");
@@ -67,6 +71,7 @@ export async function updateSettings(
       restaurant_address: restaurantAddress,
       restaurant_phone: restaurantPhone,
       table_count: tableCount,
+      allow_cashier_modify_kot_items: allowCashierModifyKotItems === true,
       updated_at: new Date().toISOString(),
     };
 

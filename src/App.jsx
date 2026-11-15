@@ -22,6 +22,7 @@ import Settings from './pages/Settings';
 import OrderHistory from './pages/OrderHistory';
 import PrinterDiagnostics from './pages/PrinterDiagnostics';
 import OrdersAnalysis from "./pages/OrdersAnalysis";
+import AdminOngoingOrders from "./pages/AdminOngoingOrders";
 
 import CashierDashboard from './pages/CashierDashboard';
 import CashierOrderEntry from './pages/CashierOrderEntry';
@@ -174,6 +175,26 @@ function App() {
             element={
               <RoleRoute allowedRole="admin">
                 <Layout><OrdersAnalysis /></Layout>
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/admin/ongoing-orders"
+            element={
+              <RoleRoute allowedRole="admin">
+                <Layout><AdminOngoingOrders /></Layout>
+              </RoleRoute>
+            }
+          />
+
+          <Route
+            path="/admin/ongoing-orders/:orderId"
+            element={
+              <RoleRoute allowedRole="admin">
+                <Layout>
+                  <WaiterOrderEntry returnPath="/admin/ongoing-orders" />
+                </Layout>
               </RoleRoute>
             }
           />

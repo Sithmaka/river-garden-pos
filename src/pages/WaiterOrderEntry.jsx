@@ -7,6 +7,7 @@ import toast, { Toaster } from "react-hot-toast";
 
 import { useMenu } from "../hooks/useMenu";
 import { usePrinterConfiguration } from "../hooks/usePrinterConfiguration";
+import { useAuth } from "../contexts/AuthContext";
 import { printerService } from "../services/printerService";
 import { formatCurrency } from "../utils/formatting";
 import { calculateBillDiscount } from "../utils/discount";
@@ -197,12 +198,16 @@ function normalizeExistingItem(item = {}, index = 0) {
   };
 }
 
-export default function WaiterOrderEntry() {
+export default function WaiterOrderEntry({ returnPath }) {
   const { orderId } = useParams();
   const navigate = useNavigate();
 
   const { menuItems, loading, error } = useMenu(true);
   const { kitchenPrinter, customerPrinter } = usePrinterConfiguration();
+  const { role } = useAuth();
+  const dashboardPath =
+    returnPath ||
+    (role === "admin" ? "/admin/ongoing-orders" : "/cashier/dashboard");
 
   const [settings, setSettings] = useState(null);
   const [activeCategory, setActiveCategory] = useState(null);
@@ -240,6 +245,8 @@ export default function WaiterOrderEntry() {
 
   const isPrintingRef = useRef(false);
   const isOfflineOrder = !!existingOrder?.isOffline;
+  const canModifyPrintedKotItems =
+    role === "admin" || settings?.allow_cashier_modify_kot_items === true;
 
   const applyLoadedOrder = useCallback((order, isOffline = false) => {
     const normalizedOrder = {
@@ -283,7 +290,7 @@ export default function WaiterOrderEntry() {
 
           toast.success("Offline order already synced. Returning to dashboard...");
 
-          navigate("/cashier/dashboard", { replace: true });
+          navigate(dashboardPath, { replace: true });
           return;
         }
 
@@ -298,14 +305,14 @@ export default function WaiterOrderEntry() {
         applyLoadedOrder(order, false);
       } else {
         toast.error("Order not found.");
-        navigate("/cashier/dashboard", { replace: true });
+        navigate(dashboardPath, { replace: true });
       }
 
       setLoadingOrder(false);
     }
 
     loadInitialData();
-  }, [orderId, navigate, applyLoadedOrder]);
+  }, [orderId, navigate, applyLoadedOrder, dashboardPath]);
 
   const categories = useMemo(() => {
     if (!menuItems?.length) return [];
@@ -465,6 +472,11 @@ export default function WaiterOrderEntry() {
   }
 
   function decreaseExistingQuantity(itemId) {
+    if (!canModifyPrintedKotItems) {
+      toast.error("Printed KOT items are locked by admin.");
+      return;
+    }
+
     const found = editableExistingItems.find((i) => i.id === itemId);
     if (!found) return;
 
@@ -497,6 +509,13 @@ export default function WaiterOrderEntry() {
 
     const { itemId, currentQuantity, newQuantity, action } =
       quantityConfirmData;
+
+    if (newQuantity < currentQuantity && !canModifyPrintedKotItems) {
+      toast.error("Printed KOT items are locked by admin.");
+      setShowQuantityConfirm(false);
+      setQuantityConfirmData(null);
+      return;
+    }
 
     try {
       if (isOfflineOrder) {
@@ -587,12 +606,24 @@ export default function WaiterOrderEntry() {
   }
 
   function removeExistingItem(itemId, itemName) {
+    if (!canModifyPrintedKotItems) {
+      toast.error("Printed KOT items are locked by admin.");
+      return;
+    }
+
     setRemoveConfirmItem({ id: itemId, name: itemName });
     setShowRemoveConfirm(true);
   }
 
   async function confirmRemoveExistingItem() {
     if (!removeConfirmItem || !orderId) return;
+
+    if (!canModifyPrintedKotItems) {
+      toast.error("Printed KOT items are locked by admin.");
+      setShowRemoveConfirm(false);
+      setRemoveConfirmItem(null);
+      return;
+    }
 
     try {
       if (isOfflineOrder) {
@@ -891,7 +922,7 @@ export default function WaiterOrderEntry() {
         toast.success("Offline order marked as paid. Will sync later.");
         setShowCustomerReceiptModal(false);
         setShowFinishModal(false);
-        navigate("/cashier/dashboard");
+        navigate(dashboardPath);
         return;
       }
 
@@ -910,7 +941,7 @@ export default function WaiterOrderEntry() {
       toast.success("Order marked as paid!");
       setShowCustomerReceiptModal(false);
       setShowFinishModal(false);
-      navigate("/cashier/dashboard");
+      navigate(dashboardPath);
     } catch (err) {
       console.error("Finish payment error:", err);
       setFinishError("Failed to mark order as paid.");
@@ -1018,7 +1049,7 @@ export default function WaiterOrderEntry() {
 
       <div className="bg-white border-b border-gray-200 p-4 flex items-center justify-start">
         <Button
-          onClick={() => navigate("/cashier/dashboard")}
+          onClick={() => navigate(dashboardPath)}
           className="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2"
         >
           ← Go Back
@@ -1027,7 +1058,9 @@ export default function WaiterOrderEntry() {
 
       <div className="max-w-4xl mx-auto p-4 w-full">
         <h1 className="text-2xl font-bold mb-4">
-          {orderId
+          {role === "admin" && orderId
+            ? `Manage Ongoing Table #${existingOrder?.table_number || "-"}`
+            : orderId
             ? isOfflineOrder
               ? "Update Offline Order"
               : `Update Order #${orderId}`
@@ -1179,6 +1212,13 @@ export default function WaiterOrderEntry() {
                 Already Ordered
               </label>
 
+              {!canModifyPrintedKotItems && (
+                <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  Printed KOT items are locked. You can add new items, but only
+                  an admin can allow voids or quantity reductions.
+                </div>
+              )}
+
               {editableExistingItems.length === 0 ? (
                 <div className="text-gray-500 bg-white p-4 rounded-lg border border-gray-200">
                   No items in this order
@@ -1193,12 +1233,14 @@ export default function WaiterOrderEntry() {
                       <div className="flex-1">
                         <span className="font-medium">{it.name}</span>
                         <div className="flex items-center gap-2 mt-1">
-                          <button
-                            onClick={() => decreaseExistingQuantity(it.id)}
-                            className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold hover:bg-gray-300"
-                          >
-                            −
-                          </button>
+                          {canModifyPrintedKotItems && (
+                            <button
+                              onClick={() => decreaseExistingQuantity(it.id)}
+                              className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold hover:bg-gray-300"
+                            >
+                              −
+                            </button>
+                          )}
                           <span className="text-sm font-semibold">
                             x {it.quantity}
                           </span>
@@ -1219,12 +1261,14 @@ export default function WaiterOrderEntry() {
                         </p>
                       </div>
 
-                      <button
-                        onClick={() => removeExistingItem(it.id, it.name)}
-                        className="ml-3 text-red-500 hover:text-red-700"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+                      {canModifyPrintedKotItems && (
+                        <button
+                          onClick={() => removeExistingItem(it.id, it.name)}
+                          className="ml-3 text-red-500 hover:text-red-700"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -1253,7 +1297,7 @@ export default function WaiterOrderEntry() {
         isOpen={showKitchenReceiptModal}
         onClose={() => {
           setShowKitchenReceiptModal(false);
-          navigate("/cashier/dashboard");
+          navigate(dashboardPath);
         }}
         title="Kitchen Slip"
         maxWidth="max-w-2xl"
@@ -1275,7 +1319,7 @@ export default function WaiterOrderEntry() {
               variant="secondary"
               onClick={() => {
                 setShowKitchenReceiptModal(false);
-                navigate("/cashier/dashboard");
+                navigate(dashboardPath);
               }}
               className="flex-1"
             >

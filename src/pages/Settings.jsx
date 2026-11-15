@@ -7,6 +7,7 @@ import {
   savePrinterConfiguration,
 } from "../services/printerConfigService";
 import Button from "../components/ui/Button";
+import Toggle from "../components/ui/Toggle";
 
 /**
  * Settings page for configuring restaurant-wide settings
@@ -31,6 +32,8 @@ export default function Settings() {
   const [restaurantAddress, setRestaurantAddress] = useState("");
   const [restaurantPhone, setRestaurantPhone] = useState("");
   const [tableCount, setTableCount] = useState(10);
+  const [allowCashierModifyKotItems, setAllowCashierModifyKotItems] =
+    useState(false);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -289,6 +292,9 @@ export default function Settings() {
       setRestaurantAddress(data.restaurant_address || "");
       setRestaurantPhone(data.restaurant_phone || "");
       setTableCount(data.table_count || 10);
+      setAllowCashierModifyKotItems(
+        data.allow_cashier_modify_kot_items === true
+      );
     }
 
     setLoading(false);
@@ -348,7 +354,8 @@ export default function Settings() {
       receiptFooter,
       restaurantAddress,
       restaurantPhone,
-      safeTableCount
+      safeTableCount,
+      allowCashierModifyKotItems
     );
 
     if (saveError) {
@@ -516,6 +523,37 @@ export default function Settings() {
             {printerLoading && (
               <div className="mb-2 text-gray-600">Loading printers...</div>
             )}
+          </div>
+
+          <div className="bg-gray-50 p-6 rounded-lg border border-gray-200">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Printed KOT Item Changes
+                </h3>
+                <p className="mt-2 text-sm text-gray-600">
+                  Allow cashiers to reduce quantities or void items that were
+                  already sent to the kitchen. Keep this disabled to lock
+                  printed KOT items.
+                </p>
+              </div>
+              <Toggle
+                enabled={allowCashierModifyKotItems}
+                onChange={setAllowCashierModifyKotItems}
+                label="Allow cashiers to modify printed KOT items"
+              />
+            </div>
+            <div
+              className={`mt-4 rounded-md px-3 py-2 text-sm font-medium ${
+                allowCashierModifyKotItems
+                  ? "bg-amber-50 text-amber-700 border border-amber-200"
+                  : "bg-green-50 text-green-700 border border-green-200"
+              }`}
+            >
+              {allowCashierModifyKotItems
+                ? "Cashiers can void or reduce printed KOT items."
+                : "Printed KOT items are locked for cashiers."}
+            </div>
           </div>
 
           <div className="bg-gray-50 p-6 rounded-lg border border-gray-200">

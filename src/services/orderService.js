@@ -219,13 +219,32 @@ export function getPendingOfflineOrderCount() {
 ========================================================= */
 
 async function getSettingsDoc() {
-  const snap = await getDoc(doc(db, "settings", "global"));
-  return snap.exists() ? snap.data() : {};
+  const restaurantSnap = await getDoc(doc(db, "settings", "restaurant"));
+  if (restaurantSnap.exists()) return restaurantSnap.data();
+
+  const legacySnap = await getDoc(doc(db, "settings", "global"));
+  return legacySnap.exists() ? legacySnap.data() : {};
 }
 
 async function getTableCount() {
   const settings = await getSettingsDoc();
   return Number(settings.table_count) || Number(settings.tableCount) || 0;
+}
+
+async function canCurrentUserModifyPrintedKotItems() {
+  const userId = await getCurrentUserId();
+  const [profileSnap, settings] = await Promise.all([
+    getDoc(doc(db, "users", userId)),
+    getSettingsDoc(),
+  ]);
+
+  if (!profileSnap.exists()) return false;
+
+  const role = profileSnap.data()?.role || "";
+  if (role === "admin") return true;
+  if (role !== "cashier") return false;
+
+  return settings.allow_cashier_modify_kot_items === true;
 }
 
 async function generateOrderNumberTx(transaction) {
@@ -775,6 +794,13 @@ export async function addItemsToOrder(orderId, newItems, serviceChargePercent) {
 
 export async function removeItemFromOrder(orderId, menuItemId, serviceChargePercent) {
   try {
+    const canModifyPrintedKot = await canCurrentUserModifyPrintedKotItems();
+    if (!canModifyPrintedKot) {
+      throw new Error(
+        "Printed KOT items are locked. Ask an admin to enable void and quantity reduction."
+      );
+    }
+
     const cashierId = await getCurrentUserId();
     const orderRef = doc(db, "orders", orderId);
 
@@ -852,6 +878,7 @@ export async function updateItemQuantityInOrder(
 ) {
   try {
     const cashierId = await getCurrentUserId();
+    const canModifyPrintedKot = await canCurrentUserModifyPrintedKotItems();
     const orderRef = doc(db, "orders", orderId);
     const safeQty = Number(newQuantity) || 0;
 
@@ -865,6 +892,13 @@ export async function updateItemQuantityInOrder(
 
       const itemIndex = currentItems.findIndex((item) => item.id === menuItemId);
       if (itemIndex < 0) throw new Error("Item not found");
+
+      const currentQuantity = Number(currentItems[itemIndex].quantity) || 0;
+      if (safeQty < currentQuantity && !canModifyPrintedKot) {
+        throw new Error(
+          "Printed KOT items are locked. Ask an admin to enable void and quantity reduction."
+        );
+      }
 
       if (safeQty <= 0) {
         currentItems.splice(itemIndex, 1);

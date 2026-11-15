@@ -23,6 +23,24 @@ service cloud.firestore {
       return isActiveUser() && myProfile().get('role', '') == 'admin';
     }
 
+    function cashierCanModifyPrintedKotItems() {
+      return isAdmin()
+        || (
+          isActiveUser()
+          && myProfile().get('role', '') == 'cashier'
+          && exists(/databases/$(database)/documents/settings/restaurant)
+          && get(/databases/$(database)/documents/settings/restaurant)
+            .data.get('allow_cashier_modify_kot_items', false) == true
+        );
+    }
+
+    function orderItemsWereNotReduced() {
+      return request.resource.data.get('items', []).size()
+          >= resource.data.get('items', []).size()
+        && request.resource.data.get('subtotal', 0)
+          >= resource.data.get('subtotal', 0);
+    }
+
     match /users/{uid} {
       allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
       allow create: if isAdmin();
@@ -56,7 +74,17 @@ service cloud.firestore {
     }
 
     match /orders/{orderId} {
-      allow read, create, update, delete: if isActiveUser();
+      allow read, create: if isActiveUser();
+      allow delete: if isAdmin();
+      allow update: if isAdmin()
+        || (
+          isActiveUser()
+          && (
+            myProfile().get('role', '') != 'cashier'
+            || cashierCanModifyPrintedKotItems()
+            || orderItemsWereNotReduced()
+          )
+        );
     }
 
     match /counters/{counterId} {
