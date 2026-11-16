@@ -978,6 +978,10 @@ export default function WaiterOrderEntry({ returnPath }) {
         window.print();
         toast.success("Kitchen slip opened for browser print.");
       }
+
+      setShowKitchenReceiptModal(false);
+      setReceiptData(null);
+      navigate(dashboardPath);
     } catch (error) {
       console.error("Print kitchen error:", error);
       toast.error(`Print failed: ${error.message}`);
@@ -1323,7 +1327,7 @@ export default function WaiterOrderEntry({ returnPath }) {
               }}
               className="flex-1"
             >
-              Close
+              Skip KOT
             </Button>
           </div>
         </div>

@@ -486,9 +486,10 @@ export default function CashierOrderEntry() {
         orientation: "portrait",
       });
 
-      lastPrintedRef.current = "kitchen";
-      setPrintConfirmMessage("✓ Kitchen slip sent to Kitchen printer");
-      setShowPrintConfirm(true);
+      setShowKitchenReceiptModal(false);
+      setReceiptData(null);
+      toast.success("Kitchen slip sent to Kitchen printer");
+      navigate("/cashier/dashboard");
     } catch (err) {
       console.error("Print error:", err);
       setPrintError(`Printing cancelled. ${err.message}`);
@@ -508,6 +509,20 @@ export default function CashierOrderEntry() {
   function handleCloseKitchenReceipt() {
     setShowKitchenReceiptModal(false);
     setReceiptData(null);
+    navigate("/cashier/dashboard");
+  }
+
+  function handlePrintConfirmationContinue() {
+    setShowPrintConfirm(false);
+
+    if (lastPrintedRef.current === "customer") {
+      setShowCustomerReceiptModal(false);
+      setShowKitchenReceiptModal(true);
+    } else if (lastPrintedRef.current === "kitchen") {
+      handleCloseKitchenReceipt();
+    }
+
+    lastPrintedRef.current = null;
   }
 
   function incrementQuantity(itemId) {
@@ -1229,7 +1244,7 @@ export default function CashierOrderEntry() {
               onClick={handleCloseKitchenReceipt}
               className="flex-1"
             >
-              Skip Print
+              Skip KOT
             </Button>
             <Button
               variant="primary"
@@ -1244,10 +1259,7 @@ export default function CashierOrderEntry() {
 
       <Modal
         isOpen={showPrintConfirm}
-        onClose={() => {
-          setShowPrintConfirm(false);
-          handleCloseKitchenReceipt();
-        }}
+        onClose={handlePrintConfirmationContinue}
         title="Print Confirmation"
         maxWidth="max-w-md"
       >
@@ -1275,18 +1287,7 @@ export default function CashierOrderEntry() {
 
           <Button
             variant="primary"
-            onClick={() => {
-              setShowPrintConfirm(false);
-
-              if (lastPrintedRef.current === "customer") {
-                setShowCustomerReceiptModal(false);
-                setShowKitchenReceiptModal(true);
-                lastPrintedRef.current = null;
-              } else if (lastPrintedRef.current === "kitchen") {
-                handleCloseKitchenReceipt();
-                lastPrintedRef.current = null;
-              }
-            }}
+            onClick={handlePrintConfirmationContinue}
             className="w-full bg-teal-600 hover:bg-teal-700 text-white"
           >
             Continue
